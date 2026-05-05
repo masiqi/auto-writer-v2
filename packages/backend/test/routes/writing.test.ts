@@ -147,6 +147,67 @@ describe("Writing routes", () => {
     });
   });
 
+  it("stores essay text in task result after all agents complete", async () => {
+    const finalEssay = [
+      "选择不是一时的冲动，而是在权衡之后仍愿意承担的方向。",
+      "",
+      "面对岔路时，青年应以清醒辨明价值，以行动回应时代。",
+      "",
+      "愿我们在每一次选择中校准自我，也照亮前行的道路。",
+      "",
+      "质量评分：92/100",
+    ].join("\n");
+    const reviewCommentary = [
+      "- 最终评分：92/100",
+      "- 等级：优秀",
+      "- 最终评语：文章立意明确，结构完整。",
+      "- 是否通过：是",
+    ].join("\n");
+
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      const systemPrompt = body.messages[0].content;
+      const content =
+        systemPrompt.includes("输出完整的最终作文") ? finalEssay : reviewCommentary;
+
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const bindings = await env();
+    const { ctx, waitForBackground } = waitUntilContext();
+    const createRes = await app.request(
+      "/api/writing",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "写一篇关于选择的作文。" }),
+      },
+      bindings,
+      ctx,
+    );
+    const created = (await createRes.json()) as WritingTaskResponse;
+
+    await waitForBackground();
+
+    const res = await app.request(`/api/writing/${created.task.id}`, {}, bindings);
+    const data = (await res.json()) as WritingTaskResponse;
+
+    expect(data.task.status).toBe("completed");
+    expect(data.task.agentResults).toHaveLength(AGENTS.length);
+    expect(data.task.result).toBe(finalEssay);
+    expect(data.task.result).toContain("选择不是一时的冲动");
+    expect(data.task.result).not.toContain("最终评语");
+    expect(data.task.result).not.toContain("是否通过");
+  });
+
   it("marks the writing task as failed when the background pipeline fails", async () => {
     vi.stubGlobal(
       "fetch",
