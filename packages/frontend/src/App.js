@@ -27,10 +27,10 @@ const essayParagraphs = (essay) => essay
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
 function App() {
-    return (_jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsxs(Route, { path: "/", element: _jsx(Shell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }));
+    return (_jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsxs(Route, { path: "/", element: _jsx(Shell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }));
 }
 function Shell() {
-    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsxs("div", { className: "mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8", children: [_jsxs("header", { className: "flex items-center justify-between border-b border-white/10 pb-4", children: [_jsxs(Link, { to: "/", className: "group flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft transition group-hover:border-cyan-300/50", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" }), "11 \u4E2A Agent \u534F\u540C\u5199\u4F5C"] })] }), _jsx(Outlet, {})] })] }));
+    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsxs("div", { className: "mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8", children: [_jsxs("header", { className: "flex items-center justify-between border-b border-white/10 pb-4", children: [_jsxs(Link, { to: "/", className: "group flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft transition group-hover:border-cyan-300/50", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsxs(Link, { to: "/settings", className: "flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex", children: [_jsx("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 16 16", fill: "currentColor", className: "size-3.5", children: _jsx("path", { fillRule: "evenodd", d: "M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.186 1.436c.372.14.722.327 1.042.548l1.37-.52a.5.5 0 0 1 .613.229l.548.95a.5.5 0 0 1-.116.626l-1.108.876c.057.388.057.78 0 1.168l1.108.876a.5.5 0 0 1 .116.625l-.548.95a.5.5 0 0 1-.613.23l-1.37-.521c-.32.22-.67.407-1.042.548l-.186 1.436a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.186-1.436a4.5 4.5 0 0 1-1.042-.548l-1.37.52a.5.5 0 0 1-.613-.229l-.548-.95a.5.5 0 0 1 .116-.626l1.108-.876a4.5 4.5 0 0 1 0-1.168l-1.108-.876a.5.5 0 0 1-.116-.625l.548-.95a.5.5 0 0 1 .613-.23l1.37.521c.32-.22.67-.407 1.042-.548l.186-1.436ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z", clipRule: "evenodd" }) }), "Settings"] }), _jsxs("span", { className: "hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" }), "11 Agents"] })] })] }), _jsx(Outlet, {})] })] }));
 }
 function HomePage() {
     const navigate = useNavigate();
@@ -228,4 +228,97 @@ function ResultPage() {
     return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Final essay" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "\u4F5C\u6587\u7EC8\u7A3F" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: task?.topic ?? "正在读取写作结果..." })] }), _jsxs("div", { className: "flex flex-wrap gap-3", children: [_jsx("button", { type: "button", onClick: handleCopy, disabled: !essay, className: "rounded-xl border border-white/12 bg-white/8 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/12 disabled:opacity-50", children: copied ? "已复制" : "复制" }), _jsx("button", { type: "button", onClick: () => navigate("/"), className: "rounded-xl bg-cyan-300 px-4 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-cyan-200", children: "Rewrite" })] })] }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, _jsx("article", { className: "mx-auto w-full max-w-4xl rounded-2xl border border-white/12 bg-[#f8fafc] px-5 py-7 text-slate-950 shadow-panel sm:px-8 md:px-12 md:py-10", children: essay ? (_jsx("div", { className: "prose-essay", children: essayParagraphs(essay).map((paragraph, index) => (_jsx("p", { children: paragraph }, `${paragraph.slice(0, 16)}-${index}`))) })) : (_jsxs("div", { className: "space-y-3", children: [_jsx("div", { className: "h-4 w-2/3 animate-pulse rounded-full bg-slate-200" }), _jsx("div", { className: "h-4 w-full animate-pulse rounded-full bg-slate-200" }), _jsx("div", { className: "h-4 w-5/6 animate-pulse rounded-full bg-slate-200" })] })) })] }));
 }
 export default App;
+function SettingsPage() {
+    const [baseUrl, setBaseUrl] = useState("");
+    const [apiKey, setApiKey] = useState("");
+    const [model, setModel] = useState("glm-5.1");
+    const [savedConfig, setSavedConfig] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const [message, setMessage] = useState(null);
+    const [testing, setTesting] = useState(false);
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const res = await fetch(apiPath("/api/config"));
+                if (!res.ok)
+                    return;
+                const data = (await res.json());
+                if (data.config) {
+                    setSavedConfig(data.config);
+                    setBaseUrl(data.config.baseUrl);
+                    setModel(data.config.model);
+                    // Don't fill apiKey — user must re-enter to update
+                }
+            }
+            catch {
+                // ignore
+            }
+        };
+        void load();
+    }, []);
+    const handleSave = async (e) => {
+        e.preventDefault();
+        setMessage(null);
+        if (!baseUrl.trim() || !apiKey.trim() || !model.trim()) {
+            setMessage({ type: "err", text: "All fields are required." });
+            return;
+        }
+        setIsSaving(true);
+        try {
+            const res = await fetch(apiPath("/api/config"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    baseUrl: baseUrl.trim().replace(/\/+$/, ""),
+                    apiKey: apiKey.trim(),
+                    model: model.trim(),
+                }),
+            });
+            if (!res.ok)
+                throw new Error(`HTTP ${res.status}`);
+            const data = (await res.json());
+            setSavedConfig(data.config);
+            setApiKey("");
+            setMessage({ type: "ok", text: "Configuration saved successfully!" });
+        }
+        catch (caught) {
+            setMessage({ type: "err", text: caught instanceof Error ? caught.message : "Save failed." });
+        }
+        finally {
+            setIsSaving(false);
+        }
+    };
+    const handleTest = async () => {
+        setTesting(true);
+        setMessage(null);
+        try {
+            const testRes = await fetch(`${baseUrl.replace(/\/+$/, "")}/v1/chat/completions`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${apiKey}`,
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [{ role: "user", content: "say ok" }],
+                    max_tokens: 5,
+                }),
+            });
+            if (testRes.ok) {
+                setMessage({ type: "ok", text: "LLM connection test passed!" });
+            }
+            else {
+                const body = await testRes.text();
+                setMessage({ type: "err", text: `Connection failed (${testRes.status}): ${body.slice(0, 120)}` });
+            }
+        }
+        catch (caught) {
+            setMessage({ type: "err", text: `Connection error: ${caught instanceof Error ? caught.message : "unknown"}` });
+        }
+        finally {
+            setTesting(false);
+        }
+    };
+    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-8", children: [_jsx("p", { className: "text-sm text-slate-400", children: "Configuration" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "LLM Settings" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: "Configure the OpenAI-compatible LLM API endpoint. The API key is stored server-side and never exposed to the browser after saving." })] }), _jsxs("div", { className: "w-full max-w-xl rounded-2xl border border-white/12 bg-ink-900/88 p-5 shadow-panel backdrop-blur md:p-7", children: [savedConfig ? (_jsxs("div", { className: "mb-6 rounded-xl border border-emerald-300/20 bg-emerald-300/8 px-4 py-3", children: [_jsxs("div", { className: "flex items-center gap-2 text-sm text-emerald-200", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400" }), "Configured"] }), _jsxs("div", { className: "mt-2 space-y-1 text-xs text-slate-300", children: [_jsxs("p", { children: ["Base URL: ", _jsx("span", { className: "text-white", children: savedConfig.baseUrl })] }), _jsxs("p", { children: ["API Key: ", _jsx("span", { className: "font-mono text-white", children: savedConfig.apiKeyMasked })] }), _jsxs("p", { children: ["Model: ", _jsx("span", { className: "text-white", children: savedConfig.model })] }), _jsxs("p", { children: ["Last updated: ", savedConfig.updatedAt] })] })] })) : (_jsx("div", { className: "mb-6 rounded-xl border border-amber-300/20 bg-amber-300/8 px-4 py-3 text-sm text-amber-200", children: "No LLM configured yet. Fill in the form below to get started." })), _jsxs("form", { onSubmit: handleSave, className: "space-y-5", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Base URL" }), _jsx("input", { value: baseUrl, onChange: (e) => setBaseUrl(e.target.value), placeholder: "https://api.openrouter.ai or http://your-server:3001", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "API Key" }), _jsx("input", { type: "password", value: apiKey, onChange: (e) => setApiKey(e.target.value), placeholder: savedConfig ? "Enter new key to update" : "sk-xxx...", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Model" }), _jsx("input", { value: model, onChange: (e) => setModel(e.target.value), placeholder: "e.g. glm-5.1, gpt-4o, deepseek-chat", className: "field-input mt-2" })] }), message ? (_jsx("div", { className: `rounded-lg border px-3 py-2 text-sm ${message.type === "ok" ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-red-400/30 bg-red-500/10 text-red-200"}`, children: message.text })) : null, _jsxs("div", { className: "flex gap-3", children: [_jsx("button", { type: "submit", disabled: isSaving, className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:opacity-60", children: isSaving ? "Saving..." : "Save" }), _jsx("button", { type: "button", onClick: handleTest, disabled: testing || !baseUrl || !apiKey || !model, className: "inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-medium text-white transition hover:bg-white/12 disabled:opacity-50", children: testing ? "Testing..." : "Test Connection" })] })] })] })] }));
+}
 //# sourceMappingURL=App.js.map
