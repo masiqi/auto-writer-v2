@@ -1,5 +1,6 @@
 export { Pipeline } from './pipeline';
 export { AGENTS } from './definitions';
+export { LLMPipelineExecutor } from './executor';
 export type {
   AgentDefinition,
   AgentContext,
