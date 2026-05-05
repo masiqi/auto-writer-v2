@@ -66,10 +66,23 @@ app.get("/", async (c) => {
 
   const stored = await kv.get(CONFIG_KEY);
   if (!stored) {
-    return c.json(error("NOT_FOUND", "LLM config not found"), 404);
+    return c.json({ config: null });
   }
 
-  return c.json({ config: JSON.parse(stored) as LlmConfig });
+  const parsed = JSON.parse(stored) as LlmConfig;
+  // Mask apiKey: show first 4 and last 4 chars
+  const masked = parsed.apiKey.length > 8
+    ? `${parsed.apiKey.slice(0, 4)}${"*".repeat(parsed.apiKey.length - 8)}${parsed.apiKey.slice(-4)}`
+    : "****";
+
+  return c.json({
+    config: {
+      baseUrl: parsed.baseUrl,
+      apiKeyMasked: masked,
+      model: parsed.model,
+      updatedAt: parsed.updatedAt,
+    },
+  });
 });
 
 export default app;

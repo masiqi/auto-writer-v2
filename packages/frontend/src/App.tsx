@@ -95,6 +95,7 @@ function App() {
           <Route index element={<HomePage />} />
           <Route path="writing/:id" element={<WritingPage />} />
           <Route path="result/:id" element={<ResultPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -119,9 +120,20 @@ function Shell() {
               <span className="text-xs text-slate-400">高中作文多智能体助手</span>
             </span>
           </Link>
-          <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex">
-            <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" />
-            11 个 Agent 协同写作
+          <div className="flex items-center gap-3">
+            <Link
+              to="/settings"
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="size-3.5">
+                <path fillRule="evenodd" d="M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.186 1.436c.372.14.722.327 1.042.548l1.37-.52a.5.5 0 0 1 .613.229l.548.95a.5.5 0 0 1-.116.626l-1.108.876c.057.388.057.78 0 1.168l1.108.876a.5.5 0 0 1 .116.625l-.548.95a.5.5 0 0 1-.613.23l-1.37-.521c-.32.22-.67.407-1.042.548l-.186 1.436a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.186-1.436a4.5 4.5 0 0 1-1.042-.548l-1.37.52a.5.5 0 0 1-.613-.229l-.548-.95a.5.5 0 0 1 .116-.626l1.108-.876a4.5 4.5 0 0 1 0-1.168l-1.108-.876a.5.5 0 0 1-.116-.625l.548-.95a.5.5 0 0 1 .613-.23l1.37.521c.32-.22.67-.407 1.042-.548l.186-1.436ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" clipRule="evenodd" />
+              </svg>
+              Settings
+            </Link>
+            <span className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex">
+              <span className="size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" />
+              11 Agents
+            </span>
           </div>
         </header>
 
@@ -575,3 +587,190 @@ function ResultPage() {
 }
 
 export default App;
+
+interface ConfigResponse {
+  config: {
+    baseUrl: string;
+    apiKeyMasked: string;
+    model: string;
+    updatedAt: string;
+  } | null;
+}
+
+function SettingsPage() {
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("glm-5.1");
+  const [savedConfig, setSavedConfig] = useState<ConfigResponse["config"]>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch(apiPath("/api/config"));
+        if (!res.ok) return;
+        const data = (await res.json()) as ConfigResponse;
+        if (data.config) {
+          setSavedConfig(data.config);
+          setBaseUrl(data.config.baseUrl);
+          setModel(data.config.model);
+          // Don't fill apiKey — user must re-enter to update
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void load();
+  }, []);
+
+  const handleSave = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setMessage(null);
+    if (!baseUrl.trim() || !apiKey.trim() || !model.trim()) {
+      setMessage({ type: "err", text: "All fields are required." });
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const res = await fetch(apiPath("/api/config"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: baseUrl.trim().replace(/\/+$/, ""),
+          apiKey: apiKey.trim(),
+          model: model.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as ConfigResponse;
+      setSavedConfig(data.config);
+      setApiKey("");
+      setMessage({ type: "ok", text: "Configuration saved successfully!" });
+    } catch (caught) {
+      setMessage({ type: "err", text: caught instanceof Error ? caught.message : "Save failed." });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setMessage(null);
+    try {
+      const testRes = await fetch(`${baseUrl.replace(/\/+$/, "")}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "say ok" }],
+          max_tokens: 5,
+        }),
+      });
+      if (testRes.ok) {
+        setMessage({ type: "ok", text: "LLM connection test passed!" });
+      } else {
+        const body = await testRes.text();
+        setMessage({ type: "err", text: `Connection failed (${testRes.status}): ${body.slice(0, 120)}` });
+      }
+    } catch (caught) {
+      setMessage({ type: "err", text: `Connection error: ${caught instanceof Error ? caught.message : "unknown"}` });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <section className="flex flex-1 flex-col py-8 lg:py-10">
+      <div className="mb-8">
+        <p className="text-sm text-slate-400">Configuration</p>
+        <h1 className="mt-2 text-3xl font-semibold text-white">LLM Settings</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+          Configure the OpenAI-compatible LLM API endpoint. The API key is stored server-side and never exposed to the browser after saving.
+        </p>
+      </div>
+
+      <div className="w-full max-w-xl rounded-2xl border border-white/12 bg-ink-900/88 p-5 shadow-panel backdrop-blur md:p-7">
+        {savedConfig ? (
+          <div className="mb-6 rounded-xl border border-emerald-300/20 bg-emerald-300/8 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-emerald-200">
+              <span className="size-2 rounded-full bg-emerald-400" />
+              Configured
+            </div>
+            <div className="mt-2 space-y-1 text-xs text-slate-300">
+              <p>Base URL: <span className="text-white">{savedConfig.baseUrl}</span></p>
+              <p>API Key: <span className="font-mono text-white">{savedConfig.apiKeyMasked}</span></p>
+              <p>Model: <span className="text-white">{savedConfig.model}</span></p>
+              <p>Last updated: {savedConfig.updatedAt}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mb-6 rounded-xl border border-amber-300/20 bg-amber-300/8 px-4 py-3 text-sm text-amber-200">
+            No LLM configured yet. Fill in the form below to get started.
+          </div>
+        )}
+
+        <form onSubmit={handleSave} className="space-y-5">
+          <label className="block">
+            <span className="field-label">Base URL</span>
+            <input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://api.openrouter.ai or http://your-server:3001"
+              className="field-input mt-2"
+            />
+          </label>
+
+          <label className="block">
+            <span className="field-label">API Key</span>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={savedConfig ? "Enter new key to update" : "sk-xxx..."}
+              className="field-input mt-2"
+            />
+          </label>
+
+          <label className="block">
+            <span className="field-label">Model</span>
+            <input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="e.g. glm-5.1, gpt-4o, deepseek-chat"
+              className="field-input mt-2"
+            />
+          </label>
+
+          {message ? (
+            <div className={`rounded-lg border px-3 py-2 text-sm ${message.type === "ok" ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-red-400/30 bg-red-500/10 text-red-200"}`}>
+              {message.text}
+            </div>
+          ) : null}
+
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:opacity-60"
+            >
+              {isSaving ? "Saving..." : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={testing || !baseUrl || !apiKey || !model}
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-medium text-white transition hover:bg-white/12 disabled:opacity-50"
+            >
+              {testing ? "Testing..." : "Test Connection"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+  );
+}

@@ -1,9 +1,12 @@
+import { cors } from "hono/cors";
 import { Hono } from "hono";
 import configRoutes from "./routes/config";
 import writingRoutes from "./routes/writing";
 import type { Bindings, ErrorResponse } from "./types";
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.use("*", cors());
 
 const error = (
   code: ErrorResponse["error"]["code"],

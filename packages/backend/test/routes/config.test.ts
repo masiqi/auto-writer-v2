@@ -10,6 +10,15 @@ type ConfigResponse = {
   };
 };
 
+type MaskedConfigResponse = {
+  config: {
+    baseUrl: string;
+    apiKeyMasked: string;
+    model: string;
+    updatedAt: string;
+  } | null;
+};
+
 const createMemoryKV = (): KVNamespace => {
   const store = new Map<string, string>();
 
@@ -60,14 +69,14 @@ describe("Config routes", () => {
     expect(data.config.updatedAt).toEqual(expect.any(String));
   });
 
-  it("returns stored LLM config", async () => {
+  it("returns stored LLM config with masked apiKey", async () => {
     const bindings = env();
     const config = {
       baseUrl: "https://api.example.com/v1",
-      apiKey: "sk-test",
+      apiKey: "sk-test-long-key-12345",
       model: "writer-model",
     };
-    const saveRes = await app.request(
+    await app.request(
       "/api/config",
       {
         method: "POST",
@@ -76,23 +85,26 @@ describe("Config routes", () => {
       },
       bindings,
     );
-    const saved = (await saveRes.json()) as ConfigResponse;
 
     const res = await app.request("/api/config", {}, bindings);
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual(saved);
+    const data = (await res.json()) as MaskedConfigResponse;
+    expect(data.config).not.toBeNull();
+    expect(data.config!.baseUrl).toBe(config.baseUrl);
+    expect(data.config!.model).toBe(config.model);
+    expect(data.config!.apiKeyMasked).toContain("sk-t");
+    expect(data.config!.apiKeyMasked).toContain("2345");
+    // Must NOT contain the full key
+    expect(data.config!.apiKeyMasked).not.toBe(config.apiKey);
   });
 
-  it("returns not found when LLM config has not been saved", async () => {
+  it("returns null config when LLM config has not been saved", async () => {
     const res = await app.request("/api/config", {}, env());
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
-      error: {
-        code: "NOT_FOUND",
-        message: "LLM config not found",
-      },
+      config: null,
     });
   });
 
