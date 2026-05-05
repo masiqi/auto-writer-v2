@@ -1,0 +1,15 @@
+{
+  "name": "skill",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "skill": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "echo \"TODO: skill dev command\""
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
