@@ -1,6 +1,6 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { createContext, useContext, useEffect, useMemo, useState, } from "react";
-import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useNavigate, useParams, } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useNavigate, useParams, useSearchParams, } from "react-router-dom";
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const AUTH_TOKEN_KEY = "auto-writer-v2:jwt";
 const AUTH_EMAIL_KEY = "auto-writer-v2:email";
@@ -39,6 +39,9 @@ const summarize = (value) => {
     const compact = value.replace(/\s+/g, " ").trim();
     return compact.length > 92 ? `${compact.slice(0, 92)}...` : compact;
 };
+const normalizeTopic = (topic) => topic.trim().toLowerCase().replace(/[。？！；，、.?!;,]+$/, "");
+const taskTopicNormalized = (task) => task.topicNormalized ?? normalizeTopic(task.topic);
+const taskVersion = (task) => task.version ?? 1;
 const essayParagraphs = (essay) => essay
     .split(/\n{2,}|\r\n{2,}/)
     .map((paragraph) => paragraph.trim())
@@ -83,7 +86,7 @@ function App() {
             setUserEmail("");
         },
     }), [token, userEmail]);
-    return (_jsx(AuthContext.Provider, { value: auth, children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(AuthShell, { children: _jsx(LoginPage, {}) }) }), _jsx(Route, { path: "/register", element: _jsx(AuthShell, { children: _jsx(RegisterPage, {}) }) }), _jsxs(Route, { path: "/", element: _jsx(ProtectedShell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "history", element: _jsx(HistoryPage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }) }));
+    return (_jsx(AuthContext.Provider, { value: auth, children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(AuthShell, { children: _jsx(LoginPage, {}) }) }), _jsx(Route, { path: "/register", element: _jsx(AuthShell, { children: _jsx(RegisterPage, {}) }) }), _jsxs(Route, { path: "/", element: _jsx(ProtectedShell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "history", element: _jsx(HistoryPage, {}) }), _jsx(Route, { path: "compare/:topicNormalized", element: _jsx(ComparePage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }) }));
 }
 function ProtectedShell() {
     const auth = useAuth();
@@ -196,25 +199,124 @@ function HistoryPage() {
             isActive = false;
         };
     }, [auth, navigate]);
-    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Writing history" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "\u5386\u53F2\u4EFB\u52A1" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: "\u67E5\u770B\u5F53\u524D\u8D26\u53F7\u521B\u5EFA\u8FC7\u7684\u4F5C\u6587\u4EFB\u52A1\uFF0C\u7EE7\u7EED\u67E5\u770B\u8FDB\u5EA6\u6216\u6253\u5F00\u5DF2\u751F\u6210\u7684\u7EC8\u7A3F\u3002" })] }), _jsx(Link, { to: "/", className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200", children: "New Task" })] }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, isLoading ? (_jsx("div", { className: "space-y-3", children: [0, 1, 2].map((item) => (_jsx("div", { className: "h-24 animate-pulse rounded-xl border border-white/10 bg-white/6" }, item))) })) : tasks.length === 0 ? (_jsxs("div", { className: "rounded-2xl border border-white/12 bg-ink-900/88 p-7 text-center shadow-panel backdrop-blur", children: [_jsx("h2", { className: "text-lg font-semibold text-white", children: "\u6682\u65E0\u5386\u53F2\u4EFB\u52A1" }), _jsx("p", { className: "mt-2 text-sm text-slate-400", children: "\u521B\u5EFA\u7B2C\u4E00\u7BC7\u4F5C\u6587\u540E\uFF0C\u4EFB\u52A1\u4F1A\u663E\u793A\u5728\u8FD9\u91CC\u3002" })] })) : (_jsx("div", { className: "space-y-3", children: tasks.map((task) => (_jsx(HistoryTaskItem, { task: task }, task.id))) }))] }));
+    const topicGroups = useMemo(() => {
+        const groups = new Map();
+        for (const task of tasks) {
+            const topicNormalized = taskTopicNormalized(task);
+            const existing = groups.get(topicNormalized);
+            if (!existing) {
+                groups.set(topicNormalized, {
+                    topic: task.topic,
+                    topicNormalized,
+                    tasks: [task],
+                    latestCreatedAt: task.createdAt,
+                });
+                continue;
+            }
+            existing.tasks.push(task);
+            if (task.createdAt > existing.latestCreatedAt) {
+                existing.topic = task.topic;
+                existing.latestCreatedAt = task.createdAt;
+            }
+        }
+        return [...groups.values()]
+            .map((group) => ({
+            ...group,
+            tasks: [...group.tasks].sort((a, b) => taskVersion(b) - taskVersion(a)),
+        }))
+            .sort((a, b) => b.latestCreatedAt.localeCompare(a.latestCreatedAt));
+    }, [tasks]);
+    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Writing history" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "\u5386\u53F2\u4EFB\u52A1" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: "\u67E5\u770B\u5F53\u524D\u8D26\u53F7\u521B\u5EFA\u8FC7\u7684\u4F5C\u6587\u4EFB\u52A1\uFF0C\u7EE7\u7EED\u67E5\u770B\u8FDB\u5EA6\u6216\u6253\u5F00\u5DF2\u751F\u6210\u7684\u7EC8\u7A3F\u3002" })] }), _jsx(Link, { to: "/", className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200", children: "New Task" })] }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, isLoading ? (_jsx("div", { className: "space-y-3", children: [0, 1, 2].map((item) => (_jsx("div", { className: "h-24 animate-pulse rounded-xl border border-white/10 bg-white/6" }, item))) })) : tasks.length === 0 ? (_jsxs("div", { className: "rounded-2xl border border-white/12 bg-ink-900/88 p-7 text-center shadow-panel backdrop-blur", children: [_jsx("h2", { className: "text-lg font-semibold text-white", children: "\u6682\u65E0\u5386\u53F2\u4EFB\u52A1" }), _jsx("p", { className: "mt-2 text-sm text-slate-400", children: "\u521B\u5EFA\u7B2C\u4E00\u7BC7\u4F5C\u6587\u540E\uFF0C\u4EFB\u52A1\u4F1A\u663E\u793A\u5728\u8FD9\u91CC\u3002" })] })) : (_jsx("div", { className: "space-y-6", children: topicGroups.map((group) => (_jsx(HistoryTopicGroup, { group: group }, group.topicNormalized))) }))] }));
+}
+function HistoryTopicGroup({ group }) {
+    const navigate = useNavigate();
+    const encodedTopic = encodeURIComponent(group.topicNormalized);
+    return (_jsxs("section", { className: "rounded-xl border border-white/10 bg-white/5 p-4", children: [_jsxs("div", { className: "mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "flex flex-wrap items-center gap-3", children: [_jsx("h2", { className: "line-clamp-2 text-lg font-semibold leading-7 text-white", children: group.topic }), _jsxs("span", { className: "rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-xs text-cyan-100", children: [group.tasks.length, " versions"] })] }), _jsxs("p", { className: "mt-1 text-xs text-slate-500", children: ["\u6700\u65B0\u521B\u5EFA\u4E8E ", formatDateTime(group.latestCreatedAt)] })] }), _jsxs("div", { className: "flex shrink-0 flex-wrap gap-2", children: [_jsx(Link, { to: `/compare/${encodedTopic}`, className: "inline-flex h-9 items-center justify-center rounded-lg border border-white/12 bg-white/8 px-3 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-300/10", children: "Compare" }), _jsx("button", { type: "button", onClick: () => navigate(`/?topic=${encodeURIComponent(group.topic)}`), className: "inline-flex h-9 items-center justify-center rounded-lg bg-cyan-300 px-3 text-xs font-semibold text-ink-950 transition hover:bg-cyan-200", children: "Revise" })] })] }), _jsx("div", { className: "space-y-3", children: group.tasks.map((task) => (_jsx(HistoryTaskItem, { task: task }, task.id))) })] }));
 }
 function HistoryTaskItem({ task }) {
     const target = task.status === "running" || task.status === "pending"
         ? `/writing/${task.id}`
         : `/result/${task.id}`;
     const preview = task.error ?? task.result ?? task.requirements ?? task.topic;
-    return (_jsx(Link, { to: target, className: "group block rounded-xl border border-white/10 bg-white/6 p-4 transition hover:border-cyan-300/30 hover:bg-white/10", children: _jsxs("div", { className: "flex flex-col gap-3 md:flex-row md:items-start md:justify-between", children: [_jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex flex-wrap items-center gap-3", children: [_jsx("span", { className: `rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`, children: statusLabels[task.status] }), _jsxs("span", { className: "text-xs text-slate-500", children: ["\u521B\u5EFA\u4E8E ", formatDateTime(task.createdAt)] }), _jsxs("span", { className: "text-xs text-slate-500", children: ["\u66F4\u65B0\u4E8E ", formatDateTime(task.updatedAt)] })] }), _jsx("h2", { className: "mt-3 line-clamp-2 text-base font-semibold leading-6 text-white transition group-hover:text-cyan-100", children: task.topic }), _jsx("p", { className: "mt-2 line-clamp-2 text-sm leading-6 text-slate-400", children: preview })] }), _jsx("span", { className: "shrink-0 text-sm text-cyan-200 transition group-hover:translate-x-1", children: "\u67E5\u770B" })] }) }));
+    return (_jsx("article", { className: "rounded-xl border border-white/10 bg-white/6 p-4 transition hover:border-cyan-300/30 hover:bg-white/10", children: _jsxs("div", { className: "flex flex-col gap-3 md:flex-row md:items-start md:justify-between", children: [_jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex flex-wrap items-center gap-3", children: [_jsxs("span", { className: "rounded-full border border-white/12 bg-black/20 px-2.5 py-1 text-xs font-medium text-slate-200", children: ["v", taskVersion(task)] }), _jsx("span", { className: `rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`, children: statusLabels[task.status] }), _jsxs("span", { className: "text-xs text-slate-500", children: ["\u521B\u5EFA\u4E8E ", formatDateTime(task.createdAt)] }), _jsxs("span", { className: "text-xs text-slate-500", children: ["\u66F4\u65B0\u4E8E ", formatDateTime(task.updatedAt)] })] }), _jsx("h3", { className: "mt-3 line-clamp-2 text-base font-semibold leading-6 text-white", children: task.topic }), _jsx("p", { className: "mt-2 line-clamp-2 text-sm leading-6 text-slate-400", children: preview })] }), _jsx(Link, { to: target, className: "shrink-0 rounded-lg border border-white/12 bg-white/8 px-3 py-2 text-sm text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10", children: "\u67E5\u770B" })] }) }));
+}
+function ComparePage() {
+    const { topicNormalized } = useParams();
+    const auth = useAuth();
+    const navigate = useNavigate();
+    const [topic, setTopic] = useState("");
+    const [versions, setVersions] = useState([]);
+    const [leftId, setLeftId] = useState("");
+    const [rightId, setRightId] = useState("");
+    const [error, setError] = useState("");
+    const [isLoading, setIsLoading] = useState(true);
+    useEffect(() => {
+        if (!topicNormalized)
+            return;
+        let isActive = true;
+        const loadVersions = async () => {
+            const response = await authFetch(auth.token, `/api/writing/by-topic/${encodeURIComponent(topicNormalized)}`);
+            if (!response.ok) {
+                if (response.status === 401) {
+                    auth.logout();
+                    navigate("/login", { replace: true });
+                    return;
+                }
+                throw new Error(`获取版本失败 (${response.status})`);
+            }
+            const data = (await response.json());
+            if (!isActive)
+                return;
+            setTopic(data.topic);
+            setVersions(data.versions);
+            setLeftId(data.versions[0]?.id ?? "");
+            setRightId(data.versions[1]?.id ?? data.versions[0]?.id ?? "");
+        };
+        void loadVersions()
+            .catch((caught) => {
+            if (isActive) {
+                setError(caught instanceof Error ? caught.message : "获取版本失败。");
+            }
+        })
+            .finally(() => {
+            if (isActive) {
+                setIsLoading(false);
+            }
+        });
+        return () => {
+            isActive = false;
+        };
+    }, [auth, navigate, topicNormalized]);
+    const selectedVersions = useMemo(() => {
+        const byId = new Map(versions.map((version) => [version.id, version]));
+        return [byId.get(leftId), byId.get(rightId)].filter((version) => Boolean(version));
+    }, [leftId, rightId, versions]);
+    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Version comparison" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "\u7248\u672C\u5BF9\u6BD4" }), _jsx("p", { className: "mt-2 max-w-3xl text-sm leading-6 text-slate-300", children: topic || "正在读取题目版本..." })] }), _jsx(Link, { to: "/history", className: "inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-medium text-white transition hover:bg-white/12", children: "Back to History" })] }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, isLoading ? (_jsx("div", { className: "grid gap-4 md:grid-cols-2", children: [0, 1].map((item) => (_jsx("div", { className: "h-80 animate-pulse rounded-xl border border-white/10 bg-white/6" }, item))) })) : versions.length === 0 ? (_jsxs("div", { className: "rounded-2xl border border-white/12 bg-ink-900/88 p-7 text-center shadow-panel backdrop-blur", children: [_jsx("h2", { className: "text-lg font-semibold text-white", children: "\u6682\u65E0\u53EF\u5BF9\u6BD4\u7248\u672C" }), _jsx("p", { className: "mt-2 text-sm text-slate-400", children: "\u8BE5\u9898\u76EE\u8FD8\u6CA1\u6709\u751F\u6210\u8FC7\u5199\u4F5C\u4EFB\u52A1\u3002" })] })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mb-5 grid gap-3 rounded-xl border border-white/10 bg-white/6 p-4 md:grid-cols-2", children: [_jsx(VersionSelect, { label: "\u5DE6\u4FA7\u7248\u672C", value: leftId, versions: versions, onChange: setLeftId }), _jsx(VersionSelect, { label: "\u53F3\u4FA7\u7248\u672C", value: rightId, versions: versions, onChange: setRightId })] }), _jsx("div", { className: "grid gap-4 md:grid-cols-2", children: selectedVersions.map((version) => (_jsx(VersionComparePanel, { task: version }, version.id))) })] }))] }));
+}
+function VersionSelect({ label, value, versions, onChange, }) {
+    return (_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: label }), _jsx("select", { value: value, onChange: (event) => onChange(event.target.value), className: "field-input mt-2", children: versions.map((version) => (_jsxs("option", { value: version.id, children: ["v", taskVersion(version), " \u00B7 ", formatDateTime(version.createdAt), " \u00B7", " ", statusLabels[version.status]] }, version.id))) })] }));
+}
+function VersionComparePanel({ task }) {
+    const text = task.result ?? task.agentResults.at(-1)?.output ?? task.error ?? "暂无结果";
+    return (_jsxs("article", { className: "flex min-h-96 flex-col rounded-xl border border-white/10 bg-white/6 p-4", children: [_jsxs("div", { className: "mb-4 flex flex-wrap items-center gap-3", children: [_jsxs("span", { className: "rounded-full border border-white/12 bg-black/20 px-2.5 py-1 text-xs font-medium text-slate-200", children: ["v", taskVersion(task)] }), _jsx("span", { className: `rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`, children: statusLabels[task.status] }), _jsx("span", { className: "text-xs text-slate-500", children: formatDateTime(task.createdAt) })] }), _jsx("h2", { className: "line-clamp-2 text-base font-semibold leading-6 text-white", children: task.topic }), _jsx("div", { className: "mt-4 flex-1 overflow-auto rounded-lg border border-white/10 bg-ink-950/70 p-4", children: _jsx("pre", { className: "whitespace-pre-wrap break-words text-sm leading-7 text-slate-200", children: text }) })] }));
 }
 function HomePage() {
     const navigate = useNavigate();
     const auth = useAuth();
-    const [prompt, setPrompt] = useState("");
+    const [searchParams] = useSearchParams();
+    const [prompt, setPrompt] = useState(() => searchParams.get("topic") ?? "");
     const [title, setTitle] = useState("");
     const [grade, setGrade] = useState("高一");
     const [requirements, setRequirements] = useState("");
     const [interactive, setInteractive] = useState(false);
     const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+    useEffect(() => {
+        const topic = searchParams.get("topic");
+        if (topic) {
+            setPrompt(topic);
+        }
+    }, [searchParams]);
     const handleSubmit = async (event) => {
         event.preventDefault();
         setError("");

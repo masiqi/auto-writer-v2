@@ -16,6 +16,7 @@ import {
   Routes,
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 
 type TaskStatus = "pending" | "running" | "paused" | "completed" | "failed";
@@ -25,6 +26,8 @@ interface WritingTask {
   id: string;
   userId: string;
   topic: string;
+  topicNormalized?: string;
+  version?: number;
   requirements?: string;
   status: TaskStatus;
   result?: string;
@@ -40,11 +43,25 @@ interface WritingTask {
 
 type WritingTaskSummary = Pick<
   WritingTask,
-  "id" | "topic" | "requirements" | "status" | "createdAt" | "updatedAt"
+  | "id"
+  | "topic"
+  | "requirements"
+  | "status"
+  | "topicNormalized"
+  | "version"
+  | "createdAt"
+  | "updatedAt"
 > & {
   result?: string;
   error?: string;
 };
+
+interface TopicGroup {
+  topic: string;
+  topicNormalized: string;
+  tasks: WritingTaskSummary[];
+  latestCreatedAt: string;
+}
 
 interface AgentResult {
   agentName: string;
@@ -135,6 +152,16 @@ const summarize = (value: string): string => {
   return compact.length > 92 ? `${compact.slice(0, 92)}...` : compact;
 };
 
+const normalizeTopic = (topic: string): string =>
+  topic.trim().toLowerCase().replace(/[。？！；，、.?!;,]+$/, "");
+
+const taskTopicNormalized = (
+  task: Pick<WritingTask, "topic" | "topicNormalized">,
+): string => task.topicNormalized ?? normalizeTopic(task.topic);
+
+const taskVersion = (task: Pick<WritingTask, "version">): number =>
+  task.version ?? 1;
+
 const essayParagraphs = (essay: string): string[] =>
   essay
     .split(/\n{2,}|\r\n{2,}/)
@@ -217,6 +244,7 @@ function App() {
           <Route path="/" element={<ProtectedShell />}>
             <Route index element={<HomePage />} />
             <Route path="history" element={<HistoryPage />} />
+            <Route path="compare/:topicNormalized" element={<ComparePage />} />
             <Route path="writing/:id" element={<WritingPage />} />
             <Route path="result/:id" element={<ResultPage />} />
             <Route path="settings" element={<SettingsPage />} />
@@ -502,6 +530,37 @@ function HistoryPage() {
     };
   }, [auth, navigate]);
 
+  const topicGroups = useMemo<TopicGroup[]>(() => {
+    const groups = new Map<string, TopicGroup>();
+
+    for (const task of tasks) {
+      const topicNormalized = taskTopicNormalized(task);
+      const existing = groups.get(topicNormalized);
+      if (!existing) {
+        groups.set(topicNormalized, {
+          topic: task.topic,
+          topicNormalized,
+          tasks: [task],
+          latestCreatedAt: task.createdAt,
+        });
+        continue;
+      }
+
+      existing.tasks.push(task);
+      if (task.createdAt > existing.latestCreatedAt) {
+        existing.topic = task.topic;
+        existing.latestCreatedAt = task.createdAt;
+      }
+    }
+
+    return [...groups.values()]
+      .map((group) => ({
+        ...group,
+        tasks: [...group.tasks].sort((a, b) => taskVersion(b) - taskVersion(a)),
+      }))
+      .sort((a, b) => b.latestCreatedAt.localeCompare(a.latestCreatedAt));
+  }, [tasks]);
+
   return (
     <section className="flex flex-1 flex-col py-8 lg:py-10">
       <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -543,12 +602,59 @@ function HistoryPage() {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {tasks.map((task) => (
-            <HistoryTaskItem key={task.id} task={task} />
+        <div className="space-y-6">
+          {topicGroups.map((group) => (
+            <HistoryTopicGroup key={group.topicNormalized} group={group} />
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+function HistoryTopicGroup({ group }: { group: TopicGroup }) {
+  const navigate = useNavigate();
+  const encodedTopic = encodeURIComponent(group.topicNormalized);
+
+  return (
+    <section className="rounded-xl border border-white/10 bg-white/5 p-4">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="line-clamp-2 text-lg font-semibold leading-7 text-white">
+              {group.topic}
+            </h2>
+            <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-xs text-cyan-100">
+              {group.tasks.length} versions
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            最新创建于 {formatDateTime(group.latestCreatedAt)}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            to={`/compare/${encodedTopic}`}
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-white/12 bg-white/8 px-3 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+          >
+            Compare
+          </Link>
+          <button
+            type="button"
+            onClick={() =>
+              navigate(`/?topic=${encodeURIComponent(group.topic)}`)
+            }
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-cyan-300 px-3 text-xs font-semibold text-ink-950 transition hover:bg-cyan-200"
+          >
+            Revise
+          </button>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {group.tasks.map((task) => (
+          <HistoryTaskItem key={task.id} task={task} />
+        ))}
+      </div>
     </section>
   );
 }
@@ -561,13 +667,13 @@ function HistoryTaskItem({ task }: { task: WritingTaskSummary }) {
   const preview = task.error ?? task.result ?? task.requirements ?? task.topic;
 
   return (
-    <Link
-      to={target}
-      className="group block rounded-xl border border-white/10 bg-white/6 p-4 transition hover:border-cyan-300/30 hover:bg-white/10"
-    >
+    <article className="rounded-xl border border-white/10 bg-white/6 p-4 transition hover:border-cyan-300/30 hover:bg-white/10">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
+            <span className="rounded-full border border-white/12 bg-black/20 px-2.5 py-1 text-xs font-medium text-slate-200">
+              v{taskVersion(task)}
+            </span>
             <span
               className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`}
             >
@@ -580,31 +686,235 @@ function HistoryTaskItem({ task }: { task: WritingTaskSummary }) {
               更新于 {formatDateTime(task.updatedAt)}
             </span>
           </div>
-          <h2 className="mt-3 line-clamp-2 text-base font-semibold leading-6 text-white transition group-hover:text-cyan-100">
+          <h3 className="mt-3 line-clamp-2 text-base font-semibold leading-6 text-white">
             {task.topic}
-          </h2>
+          </h3>
           <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-400">
             {preview}
           </p>
         </div>
-        <span className="shrink-0 text-sm text-cyan-200 transition group-hover:translate-x-1">
+        <Link
+          to={target}
+          className="shrink-0 rounded-lg border border-white/12 bg-white/8 px-3 py-2 text-sm text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+        >
           查看
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+function ComparePage() {
+  const { topicNormalized } = useParams();
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const [topic, setTopic] = useState("");
+  const [versions, setVersions] = useState<WritingTask[]>([]);
+  const [leftId, setLeftId] = useState("");
+  const [rightId, setRightId] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!topicNormalized) return;
+    let isActive = true;
+
+    const loadVersions = async () => {
+      const response = await authFetch(
+        auth.token,
+        `/api/writing/by-topic/${encodeURIComponent(topicNormalized)}`,
+      );
+      if (!response.ok) {
+        if (response.status === 401) {
+          auth.logout();
+          navigate("/login", { replace: true });
+          return;
+        }
+        throw new Error(`获取版本失败 (${response.status})`);
+      }
+
+      const data = (await response.json()) as {
+        topic: string;
+        versions: WritingTask[];
+      };
+      if (!isActive) return;
+
+      setTopic(data.topic);
+      setVersions(data.versions);
+      setLeftId(data.versions[0]?.id ?? "");
+      setRightId(data.versions[1]?.id ?? data.versions[0]?.id ?? "");
+    };
+
+    void loadVersions()
+      .catch((caught) => {
+        if (isActive) {
+          setError(caught instanceof Error ? caught.message : "获取版本失败。");
+        }
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [auth, navigate, topicNormalized]);
+
+  const selectedVersions = useMemo(() => {
+    const byId = new Map(versions.map((version) => [version.id, version]));
+    return [byId.get(leftId), byId.get(rightId)].filter(
+      (version): version is WritingTask => Boolean(version),
+    );
+  }, [leftId, rightId, versions]);
+
+  return (
+    <section className="flex flex-1 flex-col py-8 lg:py-10">
+      <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p className="text-sm text-slate-400">Version comparison</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white">版本对比</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+            {topic || "正在读取题目版本..."}
+          </p>
+        </div>
+        <Link
+          to="/history"
+          className="inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-medium text-white transition hover:bg-white/12"
+        >
+          Back to History
+        </Link>
+      </div>
+
+      {error ? (
+        <p className="mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {error}
+        </p>
+      ) : null}
+
+      {isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[0, 1].map((item) => (
+            <div
+              key={item}
+              className="h-80 animate-pulse rounded-xl border border-white/10 bg-white/6"
+            />
+          ))}
+        </div>
+      ) : versions.length === 0 ? (
+        <div className="rounded-2xl border border-white/12 bg-ink-900/88 p-7 text-center shadow-panel backdrop-blur">
+          <h2 className="text-lg font-semibold text-white">暂无可对比版本</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            该题目还没有生成过写作任务。
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="mb-5 grid gap-3 rounded-xl border border-white/10 bg-white/6 p-4 md:grid-cols-2">
+            <VersionSelect
+              label="左侧版本"
+              value={leftId}
+              versions={versions}
+              onChange={setLeftId}
+            />
+            <VersionSelect
+              label="右侧版本"
+              value={rightId}
+              versions={versions}
+              onChange={setRightId}
+            />
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {selectedVersions.map((version) => (
+              <VersionComparePanel key={version.id} task={version} />
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function VersionSelect({
+  label,
+  value,
+  versions,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  versions: WritingTask[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="field-label">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="field-input mt-2"
+      >
+        {versions.map((version) => (
+          <option key={version.id} value={version.id}>
+            v{taskVersion(version)} · {formatDateTime(version.createdAt)} ·{" "}
+            {statusLabels[version.status]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function VersionComparePanel({ task }: { task: WritingTask }) {
+  const text =
+    task.result ?? task.agentResults.at(-1)?.output ?? task.error ?? "暂无结果";
+
+  return (
+    <article className="flex min-h-96 flex-col rounded-xl border border-white/10 bg-white/6 p-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <span className="rounded-full border border-white/12 bg-black/20 px-2.5 py-1 text-xs font-medium text-slate-200">
+          v{taskVersion(task)}
+        </span>
+        <span
+          className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`}
+        >
+          {statusLabels[task.status]}
+        </span>
+        <span className="text-xs text-slate-500">
+          {formatDateTime(task.createdAt)}
         </span>
       </div>
-    </Link>
+      <h2 className="line-clamp-2 text-base font-semibold leading-6 text-white">
+        {task.topic}
+      </h2>
+      <div className="mt-4 flex-1 overflow-auto rounded-lg border border-white/10 bg-ink-950/70 p-4">
+        <pre className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-200">
+          {text}
+        </pre>
+      </div>
+    </article>
   );
 }
 
 function HomePage() {
   const navigate = useNavigate();
   const auth = useAuth();
-  const [prompt, setPrompt] = useState("");
+  const [searchParams] = useSearchParams();
+  const [prompt, setPrompt] = useState(() => searchParams.get("topic") ?? "");
   const [title, setTitle] = useState("");
   const [grade, setGrade] = useState("高一");
   const [requirements, setRequirements] = useState("");
   const [interactive, setInteractive] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const topic = searchParams.get("topic");
+    if (topic) {
+      setPrompt(topic);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

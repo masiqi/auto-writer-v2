@@ -16,7 +16,14 @@ type WritingTaskResponse = {
 
 type WritingTaskSummary = Pick<
   WritingTask,
-  "id" | "topic" | "requirements" | "status" | "createdAt" | "updatedAt"
+  | "id"
+  | "topic"
+  | "requirements"
+  | "status"
+  | "topicNormalized"
+  | "version"
+  | "createdAt"
+  | "updatedAt"
 > & {
   result?: string;
   error?: string;
@@ -24,6 +31,22 @@ type WritingTaskSummary = Pick<
 
 type WritingTaskListResponse = {
   tasks: WritingTaskSummary[];
+};
+
+type TopicListResponse = {
+  topics: Array<{
+    topic: string;
+    topicNormalized: string;
+    versionCount: number;
+    latestVersion: number;
+    latestStatus: WritingTask["status"];
+    createdAt: string;
+  }>;
+};
+
+type TopicVersionsResponse = {
+  topic: string;
+  versions: WritingTask[];
 };
 
 type TestWritingPipelineMessage = {
@@ -107,6 +130,8 @@ describe("Writing routes", () => {
       },
     });
     expect(data.task.id).toEqual(expect.any(String));
+    expect(data.task.topicNormalized).toBe("请围绕成长写一篇作文");
+    expect(data.task.version).toBe(1);
     expect(data.task.createdAt).toEqual(expect.any(String));
     expect(data.task.updatedAt).toEqual(expect.any(String));
 
@@ -120,10 +145,66 @@ describe("Writing routes", () => {
         topic: request.prompt,
         requirements: "标题：材料作文\n年级：高一",
         status: "running",
+        topicNormalized: "请围绕成长写一篇作文",
+        version: 1,
         createdAt: data.task.createdAt,
         updatedAt: data.task.updatedAt,
       },
     ]);
+  });
+
+  it("assigns incrementing versions for matching normalized topics", async () => {
+    const sentMessages: TestWritingPipelineMessage[] = [];
+    const bindings = {
+      ...(await env()),
+      WRITING_QUEUE: {
+        sendMessage: (message: TestWritingPipelineMessage) => {
+          sentMessages.push(message);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const firstRes = await app.request(
+      "/api/writing",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
+        body: JSON.stringify({ prompt: "  The Same Topic?!  " }),
+      },
+      bindings,
+    );
+    const secondRes = await app.request(
+      "/api/writing",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
+        body: JSON.stringify({ prompt: "the same topic" }),
+      },
+      bindings,
+    );
+
+    expect(firstRes.status).toBe(201);
+    expect(secondRes.status).toBe(201);
+    const first = (await firstRes.json()) as WritingTaskResponse;
+    const second = (await secondRes.json()) as WritingTaskResponse;
+    expect(first.task).toMatchObject({
+      topic: "The Same Topic?!",
+      topicNormalized: "the same topic",
+      version: 1,
+    });
+    expect(second.task).toMatchObject({
+      topic: "the same topic",
+      topicNormalized: "the same topic",
+      version: 2,
+    });
+    expect(sentMessages).toHaveLength(2);
   });
 
   it("lists the authenticated user's writing tasks newest first", async () => {
@@ -205,6 +286,170 @@ describe("Writing routes", () => {
         createdAt: older.createdAt,
         updatedAt: older.updatedAt,
       },
+    ]);
+  });
+
+  it("lists unique topics grouped from the authenticated user's task index", async () => {
+    const bindings = await env();
+    const otherUser = await registerUser(
+      bindings.AUTO_WRITER_KV,
+      "topic-other@example.com",
+    );
+    const tasks: WritingTask[] = [
+      {
+        id: "growth-v1",
+        userId: bindings.user.id,
+        topic: "成长",
+        topicNormalized: "成长",
+        version: 1,
+        status: "completed",
+        result: "第一版",
+        agentResults: [],
+        createdAt: "2026-05-01T10:00:00.000Z",
+        updatedAt: "2026-05-01T10:01:00.000Z",
+      },
+      {
+        id: "growth-v2",
+        userId: bindings.user.id,
+        topic: " 成长！",
+        topicNormalized: "成长",
+        version: 2,
+        status: "paused",
+        agentResults: [],
+        createdAt: "2026-05-02T10:00:00.000Z",
+        updatedAt: "2026-05-02T10:01:00.000Z",
+      },
+      {
+        id: "choice-v1",
+        userId: bindings.user.id,
+        topic: "选择",
+        topicNormalized: "选择",
+        version: 1,
+        status: "failed",
+        error: "failed",
+        agentResults: [],
+        createdAt: "2026-05-03T10:00:00.000Z",
+        updatedAt: "2026-05-03T10:01:00.000Z",
+      },
+      {
+        id: "other-topic",
+        userId: otherUser.user.id,
+        topic: "成长",
+        topicNormalized: "成长",
+        version: 1,
+        status: "completed",
+        agentResults: [],
+        createdAt: "2026-05-04T10:00:00.000Z",
+        updatedAt: "2026-05-04T10:01:00.000Z",
+      },
+    ];
+
+    await bindings.AUTO_WRITER_KV.put(
+      taskIndexKey(bindings.user.id),
+      JSON.stringify(tasks.slice(0, 3)),
+    );
+    await bindings.AUTO_WRITER_KV.put(
+      taskIndexKey(otherUser.user.id),
+      JSON.stringify([tasks[3]]),
+    );
+
+    const res = await app.request(
+      "/api/topics",
+      { headers: authHeaders(bindings.token) },
+      bindings,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as TopicListResponse;
+    expect(data.topics).toEqual([
+      {
+        topic: "选择",
+        topicNormalized: "选择",
+        versionCount: 1,
+        latestVersion: 1,
+        latestStatus: "failed",
+        createdAt: "2026-05-03T10:00:00.000Z",
+      },
+      {
+        topic: " 成长！",
+        topicNormalized: "成长",
+        versionCount: 2,
+        latestVersion: 2,
+        latestStatus: "paused",
+        createdAt: "2026-05-02T10:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("returns all task versions for a normalized topic", async () => {
+    const bindings = await env();
+    const targetTasks: WritingTask[] = [
+      {
+        id: "topic-v1",
+        userId: bindings.user.id,
+        topic: "The Same Topic.",
+        topicNormalized: "the same topic",
+        version: 1,
+        status: "completed",
+        result: "Version one",
+        agentResults: [],
+        createdAt: "2026-05-01T10:00:00.000Z",
+        updatedAt: "2026-05-01T10:01:00.000Z",
+      },
+      {
+        id: "topic-v2",
+        userId: bindings.user.id,
+        topic: "the same topic",
+        topicNormalized: "the same topic",
+        version: 2,
+        status: "completed",
+        result: "Version two",
+        agentResults: [],
+        createdAt: "2026-05-02T10:00:00.000Z",
+        updatedAt: "2026-05-02T10:01:00.000Z",
+      },
+      {
+        id: "other-topic",
+        userId: bindings.user.id,
+        topic: "Other",
+        topicNormalized: "other",
+        version: 1,
+        status: "completed",
+        result: "Other",
+        agentResults: [],
+        createdAt: "2026-05-03T10:00:00.000Z",
+        updatedAt: "2026-05-03T10:01:00.000Z",
+      },
+    ];
+
+    for (const task of targetTasks) {
+      await bindings.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+      await bindings.AUTO_WRITER_KV.put(
+        taskKey(task.userId, task.id),
+        JSON.stringify(task),
+      );
+    }
+    await bindings.AUTO_WRITER_KV.put(
+      taskIndexKey(bindings.user.id),
+      JSON.stringify(targetTasks),
+    );
+
+    const res = await app.request(
+      `/api/writing/by-topic/${encodeURIComponent("the same topic")}`,
+      { headers: authHeaders(bindings.token) },
+      bindings,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as TopicVersionsResponse;
+    expect(data.topic).toBe("The Same Topic.");
+    expect(data.versions.map((task) => task.id)).toEqual([
+      "topic-v1",
+      "topic-v2",
+    ]);
+    expect(data.versions.map((task) => task.result)).toEqual([
+      "Version one",
+      "Version two",
     ]);
   });
 

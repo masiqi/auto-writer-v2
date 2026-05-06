@@ -6,6 +6,9 @@ import {
   getProgressEvents,
   getTask,
   getTaskIndex,
+  getTasksByTopic,
+  nextTopicVersion,
+  normalizeTopic,
   progressKey,
   putTask,
   removeTaskIndexEntry,
@@ -79,6 +82,14 @@ const delay = (milliseconds: number): Promise<void> =>
     setTimeout(resolve, milliseconds);
   });
 
+const decodePathParam = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 const sendQueueMessage = async (
   queue: QueueWithSendMessage,
   message: WritingPipelineMessage,
@@ -127,6 +138,9 @@ app.post("/", async (c) => {
   }
 
   const now = new Date().toISOString();
+  const topic = input.prompt.trim();
+  const topicNormalized = normalizeTopic(topic);
+  const version = await nextTopicVersion(kv, userId, topicNormalized);
   const requirements = buildRequirements(
     input.title,
     input.requirements,
@@ -135,7 +149,9 @@ app.post("/", async (c) => {
   const task: WritingTask = {
     id: crypto.randomUUID(),
     userId,
-    topic: input.prompt.trim(),
+    topic,
+    topicNormalized,
+    version,
     status: "running",
     interactive: input.interactive === true,
     pausedAtAgent: null,
@@ -178,6 +194,22 @@ app.get("/", async (c) => {
 
   const tasks = await getTaskIndex(kv, c.get("userId"));
   return c.json({ tasks });
+});
+
+app.get("/by-topic/:topicNormalized", async (c) => {
+  const kv = c.env.AUTO_WRITER_KV;
+  if (!kv) {
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
+  }
+
+  const topicNormalized = decodePathParam(c.req.param("topicNormalized"));
+  const versions = await getTasksByTopic(kv, c.get("userId"), topicNormalized);
+  const topic = versions[0]?.topic ?? topicNormalized;
+
+  return c.json({ topic, versions });
 });
 
 app.get("/:id", async (c) => {

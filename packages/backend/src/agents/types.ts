@@ -40,6 +40,8 @@ export interface WritingTask {
   id: string;
   userId: string;
   topic: string;
+  topicNormalized?: string;
+  version?: number;
   requirements?: string;
   status: TaskStatus;
   result?: string;

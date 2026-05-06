@@ -17,7 +17,14 @@ export type WritingPipelineMessage = {
 
 export type WritingTaskSummary = Pick<
   WritingTask,
-  "id" | "topic" | "requirements" | "status" | "createdAt" | "updatedAt"
+  | "id"
+  | "topic"
+  | "requirements"
+  | "status"
+  | "topicNormalized"
+  | "version"
+  | "createdAt"
+  | "updatedAt"
 > & {
   result?: string;
   error?: string;
@@ -39,6 +46,9 @@ export const taskIndexKey = (userId: string) => `user:${userId}:tasks`;
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
+export const normalizeTopic = (topic: string): string =>
+  topic.trim().toLowerCase().replace(/[。？！；，、.?!;,]+$/, "");
+
 export const getTask = async (
   kv: KVNamespace,
   userId: string,
@@ -57,6 +67,12 @@ const taskSummary = (task: WritingTask): WritingTaskSummary => {
     updatedAt: task.updatedAt,
   };
 
+  if (task.topicNormalized) {
+    summary.topicNormalized = task.topicNormalized;
+  }
+  if (task.version !== undefined) {
+    summary.version = task.version;
+  }
   if (task.requirements) {
     summary.requirements = task.requirements;
   }
@@ -104,6 +120,95 @@ export const removeTaskIndexEntry = async (
   const summaries = await getTaskIndex(kv, userId);
   const nextSummaries = summaries.filter((summary) => summary.id !== id);
   await kv.put(taskIndexKey(userId), JSON.stringify(nextSummaries));
+};
+
+export type TopicSummary = {
+  topic: string;
+  topicNormalized: string;
+  versionCount: number;
+  latestVersion: number;
+  latestStatus: WritingTask["status"];
+  createdAt: string;
+};
+
+const summaryTopicNormalized = (summary: WritingTaskSummary): string =>
+  summary.topicNormalized ?? normalizeTopic(summary.topic);
+
+const summaryVersion = (summary: WritingTaskSummary): number =>
+  summary.version ?? 1;
+
+export const nextTopicVersion = async (
+  kv: KVNamespace,
+  userId: string,
+  topicNormalized: string,
+): Promise<number> => {
+  const summaries = await getTaskIndex(kv, userId);
+  const versions = summaries
+    .filter((summary) => summaryTopicNormalized(summary) === topicNormalized)
+    .map(summaryVersion);
+
+  return versions.length > 0 ? Math.max(...versions) + 1 : 1;
+};
+
+export const getTopicSummaries = async (
+  kv: KVNamespace,
+  userId: string,
+): Promise<TopicSummary[]> => {
+  const summaries = await getTaskIndex(kv, userId);
+  const topics = new Map<string, TopicSummary>();
+
+  for (const summary of summaries) {
+    const topicNormalized = summaryTopicNormalized(summary);
+    const version = summaryVersion(summary);
+    const existing = topics.get(topicNormalized);
+
+    if (!existing) {
+      topics.set(topicNormalized, {
+        topic: summary.topic,
+        topicNormalized,
+        versionCount: 1,
+        latestVersion: version,
+        latestStatus: summary.status,
+        createdAt: summary.createdAt,
+      });
+      continue;
+    }
+
+    existing.versionCount += 1;
+    existing.latestVersion = Math.max(existing.latestVersion, version);
+    if (summary.createdAt > existing.createdAt) {
+      existing.topic = summary.topic;
+      existing.latestStatus = summary.status;
+      existing.createdAt = summary.createdAt;
+    }
+  }
+
+  return [...topics.values()].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
+};
+
+export const getTasksByTopic = async (
+  kv: KVNamespace,
+  userId: string,
+  topicNormalized: string,
+): Promise<WritingTask[]> => {
+  const summaries = await getTaskIndex(kv, userId);
+  const matchingSummaries = summaries.filter(
+    (summary) => summaryTopicNormalized(summary) === topicNormalized,
+  );
+  const tasks = await Promise.all(
+    matchingSummaries.map((summary) => getTask(kv, userId, summary.id)),
+  );
+
+  return tasks
+    .filter((task): task is WritingTask => task !== null)
+    .sort((a, b) => {
+      const versionComparison = (a.version ?? 1) - (b.version ?? 1);
+      return versionComparison !== 0
+        ? versionComparison
+        : a.createdAt.localeCompare(b.createdAt);
+    });
 };
 
 export const putTask = async (
