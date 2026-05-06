@@ -59,6 +59,19 @@ type QueueWithSendMessage = Queue<WritingPipelineMessage> & {
   sendMessage?: (message: WritingPipelineMessage) => Promise<unknown>;
 };
 
+const SSE_POLL_INTERVAL_MS = 2_000;
+
+const isTerminalTask = (task: WritingTask): boolean =>
+  task.status === "completed" || task.status === "failed";
+
+const sseEvent = (event: string, data: unknown): string =>
+  `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+const delay = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
 const sendQueueMessage = async (
   queue: QueueWithSendMessage,
   message: WritingPipelineMessage,
@@ -74,7 +87,10 @@ const sendQueueMessage = async (
 app.post("/", async (c) => {
   const kv = c.env.AUTO_WRITER_KV;
   if (!kv) {
-    return c.json(error("CONFIGURATION_ERROR", "KV binding is not configured"), 500);
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
   }
 
   let body: unknown;
@@ -93,7 +109,10 @@ app.post("/", async (c) => {
 
   const config = await getLLMConfig(kv);
   if (!config) {
-    return c.json(error("CONFIGURATION_ERROR", "LLM config is not configured"), 500);
+    return c.json(
+      error("CONFIGURATION_ERROR", "LLM config is not configured"),
+      500,
+    );
   }
 
   const now = new Date().toISOString();
@@ -137,7 +156,10 @@ app.post("/", async (c) => {
 app.get("/:id", async (c) => {
   const kv = c.env.AUTO_WRITER_KV;
   if (!kv) {
-    return c.json(error("CONFIGURATION_ERROR", "KV binding is not configured"), 500);
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
   }
 
   const task = await getTask(kv, c.req.param("id"));
@@ -151,7 +173,10 @@ app.get("/:id", async (c) => {
 app.get("/:id/stream", async (c) => {
   const kv = c.env.AUTO_WRITER_KV;
   if (!kv) {
-    return c.json(error("CONFIGURATION_ERROR", "KV binding is not configured"), 500);
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
   }
 
   const id = c.req.param("id");
@@ -161,18 +186,76 @@ app.get("/:id/stream", async (c) => {
   }
 
   const events = await getProgressEvents(kv, id);
-  const body = [
-    `event: task\ndata: ${JSON.stringify(task)}\n\n`,
-    ...events.map((event) => {
-      return `event: progress\ndata: ${JSON.stringify(event)}\n\n`;
-    }),
-  ].join("");
+  const encoder = new TextEncoder();
+  let isCancelled = false;
+
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let sentProgressCount = 0;
+
+      const send = (event: string, data: unknown): void => {
+        if (!isCancelled) {
+          controller.enqueue(encoder.encode(sseEvent(event, data)));
+        }
+      };
+
+      send("task", task);
+      for (const event of events) {
+        send("progress", event);
+        sentProgressCount += 1;
+      }
+
+      if (isTerminalTask(task)) {
+        controller.close();
+        return;
+      }
+
+      try {
+        while (!isCancelled) {
+          await delay(SSE_POLL_INTERVAL_MS);
+          if (isCancelled) {
+            return;
+          }
+
+          const [nextEvents, nextTask] = await Promise.all([
+            getProgressEvents(kv, id),
+            getTask(kv, id),
+          ]);
+
+          if (nextEvents.length > sentProgressCount) {
+            for (const event of nextEvents.slice(sentProgressCount)) {
+              send("progress", event);
+            }
+            sentProgressCount = nextEvents.length;
+          }
+
+          if (!nextTask) {
+            controller.close();
+            return;
+          }
+
+          if (isTerminalTask(nextTask)) {
+            send("task", nextTask);
+            controller.close();
+            return;
+          }
+        }
+      } catch (caught) {
+        controller.error(caught);
+      }
+    },
+    cancel() {
+      isCancelled = true;
+      return undefined;
+    },
+  });
 
   return new Response(body, {
     headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
+      "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 });
