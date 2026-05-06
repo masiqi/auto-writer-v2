@@ -12,12 +12,21 @@ export type WritingPipelineMessage = {
   userId: string;
 };
 
+export type WritingTaskSummary = Pick<
+  WritingTask,
+  "id" | "topic" | "requirements" | "status" | "createdAt" | "updatedAt"
+> & {
+  result?: string;
+  error?: string;
+};
+
 export const configKey = (userId: string) => `user:${userId}:config:llm`;
 export const taskOwnerKey = (id: string) => `writing:${id}:owner`;
 export const taskKey = (userId: string, id: string) =>
   `user:${userId}:writing:${id}`;
 export const progressKey = (userId: string, id: string) =>
   `user:${userId}:writing:${id}:progress`;
+export const taskIndexKey = (userId: string) => `user:${userId}:tasks`;
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
@@ -31,12 +40,73 @@ export const getTask = async (
   return stored ? (JSON.parse(stored) as WritingTask) : null;
 };
 
+const taskSummary = (task: WritingTask): WritingTaskSummary => {
+  const summary: WritingTaskSummary = {
+    id: task.id,
+    topic: task.topic,
+    status: task.status,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+
+  if (task.requirements) {
+    summary.requirements = task.requirements;
+  }
+  if (task.result) {
+    summary.result = task.result;
+  }
+  if (task.error) {
+    summary.error = task.error;
+  }
+
+  return summary;
+};
+
+export const getTaskIndex = async (
+  kv: KVNamespace,
+  userId: string,
+): Promise<WritingTaskSummary[]> => {
+  const stored = await kv.get(taskIndexKey(userId));
+  const summaries = stored
+    ? (JSON.parse(stored) as WritingTask[]).map(taskSummary)
+    : [];
+
+  return [...summaries].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+};
+
+export const putTaskIndexEntry = async (
+  kv: KVNamespace,
+  task: WritingTask,
+): Promise<void> => {
+  const summaries = await getTaskIndex(kv, task.userId);
+  const nextSummary = taskSummary(task);
+  const nextSummaries = [
+    nextSummary,
+    ...summaries.filter((summary) => summary.id !== task.id),
+  ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  await kv.put(taskIndexKey(task.userId), JSON.stringify(nextSummaries));
+};
+
+export const removeTaskIndexEntry = async (
+  kv: KVNamespace,
+  userId: string,
+  id: string,
+): Promise<void> => {
+  const summaries = await getTaskIndex(kv, userId);
+  const nextSummaries = summaries.filter((summary) => summary.id !== id);
+  await kv.put(taskIndexKey(userId), JSON.stringify(nextSummaries));
+};
+
 export const putTask = async (
   kv: KVNamespace,
   task: WritingTask,
 ): Promise<void> => {
-  await kv.put(taskOwnerKey(task.id), task.userId);
-  await kv.put(taskKey(task.userId, task.id), JSON.stringify(task));
+  await Promise.all([
+    kv.put(taskOwnerKey(task.id), task.userId),
+    kv.put(taskKey(task.userId, task.id), JSON.stringify(task)),
+    putTaskIndexEntry(kv, task),
+  ]);
 };
 
 export const getProgressEvents = async (

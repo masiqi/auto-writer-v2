@@ -4,9 +4,12 @@ import {
   getLLMConfig,
   getProgressEvents,
   getTask,
+  getTaskIndex,
   progressKey,
   putTask,
+  removeTaskIndexEntry,
   runPipeline,
+  taskKey,
   taskOwnerKey,
 } from "../queue";
 import type { WritingPipelineMessage } from "../queue";
@@ -156,6 +159,19 @@ app.post("/", async (c) => {
   return c.json({ task }, 201);
 });
 
+app.get("/", async (c) => {
+  const kv = c.env.AUTO_WRITER_KV;
+  if (!kv) {
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
+  }
+
+  const tasks = await getTaskIndex(kv, c.get("userId"));
+  return c.json({ tasks });
+});
+
 app.get("/:id", async (c) => {
   const kv = c.env.AUTO_WRITER_KV;
   if (!kv) {
@@ -181,6 +197,40 @@ app.get("/:id", async (c) => {
   }
 
   return c.json({ task });
+});
+
+app.delete("/:id", async (c) => {
+  const kv = c.env.AUTO_WRITER_KV;
+  if (!kv) {
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
+  }
+
+  const id = c.req.param("id");
+  const userId = c.get("userId");
+  const ownerId = await kv.get(taskOwnerKey(id));
+  if (ownerId && ownerId !== userId) {
+    return c.json(
+      error("FORBIDDEN", "Writing task belongs to another user"),
+      403,
+    );
+  }
+
+  const task = await getTask(kv, userId, id);
+  if (!task) {
+    return c.json(error("NOT_FOUND", "Writing task not found"), 404);
+  }
+
+  await Promise.all([
+    kv.delete(taskKey(userId, id)),
+    kv.delete(progressKey(userId, id)),
+    kv.delete(taskOwnerKey(id)),
+    removeTaskIndexEntry(kv, userId, id),
+  ]);
+
+  return c.body(null, 204);
 });
 
 app.get("/:id/stream", async (c) => {
