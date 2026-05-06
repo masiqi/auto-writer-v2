@@ -28,10 +28,11 @@ export interface AgentResult {
   duration: number;
 }
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
 export interface WritingTask {
   id: string;
+  userId: string;
   topic: string;
   requirements?: string;
   status: TaskStatus;
@@ -43,7 +44,12 @@ export interface WritingTask {
 }
 
 export interface ProgressEvent {
-  type: 'agent_start' | 'agent_progress' | 'agent_complete' | 'pipeline_complete' | 'pipeline_error';
+  type:
+    | "agent_start"
+    | "agent_progress"
+    | "agent_complete"
+    | "pipeline_complete"
+    | "pipeline_error";
   agentName?: string;
   agentIndex?: number;
   totalAgents?: number;
@@ -55,6 +61,15 @@ export interface ProgressEvent {
 export type ProgressCallback = (event: ProgressEvent) => void;
 
 export interface PipelineExecutor {
-  execute(systemPrompt: string, userMessage: string, config: LLMConfig): Promise<string>;
-  executeStream?(systemPrompt: string, userMessage: string, config: LLMConfig, onChunk: (chunk: string) => void): Promise<string>;
+  execute(
+    systemPrompt: string,
+    userMessage: string,
+    config: LLMConfig,
+  ): Promise<string>;
+  executeStream?(
+    systemPrompt: string,
+    userMessage: string,
+    config: LLMConfig,
+    onChunk: (chunk: string) => void,
+  ): Promise<string>;
 }

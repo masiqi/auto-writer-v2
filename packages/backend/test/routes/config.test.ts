@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { app } from "../../src/index";
+import { authHeaders, createMemoryKV, registerUser } from "../helpers";
 
 type ConfigResponse = {
   config: {
@@ -19,28 +20,10 @@ type MaskedConfigResponse = {
   } | null;
 };
 
-const createMemoryKV = (): KVNamespace => {
-  const store = new Map<string, string>();
-
-  return {
-    get: (key: string) => Promise.resolve(store.get(key) ?? null),
-    put: (key: string, value: string) => {
-      store.set(key, value);
-      return Promise.resolve();
-    },
-    delete: (key: string) => {
-      store.delete(key);
-      return Promise.resolve();
-    },
-  } as unknown as KVNamespace;
-};
-
-const env = () => ({
-  AUTO_WRITER_KV: createMemoryKV(),
-});
-
 describe("Config routes", () => {
-  it("saves LLM config in KV", async () => {
+  it("saves LLM config in user-scoped KV", async () => {
+    const kv = createMemoryKV();
+    const { token, user } = await registerUser(kv);
     const config = {
       baseUrl: "https://api.example.com/v1",
       apiKey: "sk-test",
@@ -51,10 +34,10 @@ describe("Config routes", () => {
       "/api/config",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
         body: JSON.stringify(config),
       },
-      env(),
+      { AUTO_WRITER_KV: kv },
     );
 
     expect(res.status).toBe(200);
@@ -67,10 +50,16 @@ describe("Config routes", () => {
       },
     });
     expect(data.config.updatedAt).toEqual(expect.any(String));
+    await expect(kv.get("config:llm")).resolves.toBeNull();
+    await expect(kv.get(`user:${user.id}:config:llm`)).resolves.toEqual(
+      expect.any(String),
+    );
   });
 
   it("returns stored LLM config with masked apiKey", async () => {
-    const bindings = env();
+    const kv = createMemoryKV();
+    const { token } = await registerUser(kv);
+    const bindings = { AUTO_WRITER_KV: kv };
     const config = {
       baseUrl: "https://api.example.com/v1",
       apiKey: "sk-test-long-key-12345",
@@ -80,13 +69,17 @@ describe("Config routes", () => {
       "/api/config",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
         body: JSON.stringify(config),
       },
       bindings,
     );
 
-    const res = await app.request("/api/config", {}, bindings);
+    const res = await app.request(
+      "/api/config",
+      { headers: authHeaders(token) },
+      bindings,
+    );
 
     expect(res.status).toBe(200);
     const data = (await res.json()) as MaskedConfigResponse;
@@ -100,7 +93,13 @@ describe("Config routes", () => {
   });
 
   it("returns null config when LLM config has not been saved", async () => {
-    const res = await app.request("/api/config", {}, env());
+    const kv = createMemoryKV();
+    const { token } = await registerUser(kv);
+    const res = await app.request(
+      "/api/config",
+      { headers: authHeaders(token) },
+      { AUTO_WRITER_KV: kv },
+    );
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
@@ -108,18 +107,52 @@ describe("Config routes", () => {
     });
   });
 
+  it("isolates LLM config by user", async () => {
+    const kv = createMemoryKV();
+    const userA = await registerUser(kv, "a@example.com");
+    const userB = await registerUser(kv, "b@example.com");
+
+    await app.request(
+      "/api/config",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(userA.token),
+        },
+        body: JSON.stringify({
+          baseUrl: "https://a.example.com",
+          apiKey: "sk-user-a",
+          model: "model-a",
+        }),
+      },
+      { AUTO_WRITER_KV: kv },
+    );
+
+    const res = await app.request(
+      "/api/config",
+      { headers: authHeaders(userB.token) },
+      { AUTO_WRITER_KV: kv },
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ config: null });
+  });
+
   it("rejects incomplete LLM config", async () => {
+    const kv = createMemoryKV();
+    const { token } = await registerUser(kv);
     const res = await app.request(
       "/api/config",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
         body: JSON.stringify({
           baseUrl: "https://api.example.com/v1",
           apiKey: "sk-test",
         }),
       },
-      env(),
+      { AUTO_WRITER_KV: kv },
     );
 
     expect(res.status).toBe(400);

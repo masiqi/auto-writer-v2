@@ -3,29 +3,15 @@ import { queue } from "../src/queue";
 import { AGENTS } from "../src/agents/definitions";
 import type { WritingTask } from "../src/agents/types";
 import type { Bindings } from "../src/types";
+import { createMemoryKV } from "./helpers";
 
-const taskKey = (id: string) => `writing:${id}`;
-
-const createMemoryKV = (): KVNamespace => {
-  const store = new Map<string, string>();
-
-  return {
-    get: (key: string) => Promise.resolve(store.get(key) ?? null),
-    put: (key: string, value: string) => {
-      store.set(key, value);
-      return Promise.resolve();
-    },
-    delete: (key: string) => {
-      store.delete(key);
-      return Promise.resolve();
-    },
-  } as unknown as KVNamespace;
-};
+const USER_ID = "user-1";
+const taskKey = (userId: string, id: string) => `user:${userId}:writing:${id}`;
 
 const createEnv = async (): Promise<Bindings> => {
   const kv = createMemoryKV();
   await kv.put(
-    "config:llm",
+    `user:${USER_ID}:config:llm`,
     JSON.stringify({
       baseUrl: "https://llm.example.com",
       apiKey: "test-key",
@@ -45,6 +31,7 @@ const createTask = async (
   const now = new Date().toISOString();
   const task: WritingTask = {
     id: "task-1",
+    userId: USER_ID,
     topic: "写一篇关于选择的作文。",
     requirements: "年级：高一",
     status: "running",
@@ -54,12 +41,12 @@ const createTask = async (
     ...overrides,
   };
 
-  await kv.put(taskKey(task.id), JSON.stringify(task));
+  await kv.put(taskKey(task.userId, task.id), JSON.stringify(task));
   return task;
 };
 
 const createBatch = (
-  messages: Array<{ taskId: string }>,
+  messages: Array<{ taskId: string; userId: string }>,
 ): MessageBatch<unknown> =>
   ({
     queue: "writing-pipeline",
@@ -79,7 +66,7 @@ const createBatch = (
     },
     retryAll: vi.fn(),
     ackAll: vi.fn(),
-  }) as unknown as MessageBatch<{ taskId?: string }>;
+  }) as unknown as MessageBatch<{ taskId?: string; userId?: string }>;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -101,10 +88,10 @@ describe("writing queue handler", () => {
     const env = await createEnv();
     const task = await createTask(env.AUTO_WRITER_KV);
 
-    await queue(createBatch([{ taskId: task.id }]), env);
+    await queue(createBatch([{ taskId: task.id, userId: task.userId }]), env);
 
     const stored = JSON.parse(
-      (await env.AUTO_WRITER_KV.get(taskKey(task.id))) ?? "{}",
+      (await env.AUTO_WRITER_KV.get(taskKey(task.userId, task.id))) ?? "{}",
     ) as WritingTask;
     expect(stored.status).toBe("completed");
     expect(stored.result).toBe("agent output");
@@ -121,10 +108,10 @@ describe("writing queue handler", () => {
     const env = await createEnv();
     const task = await createTask(env.AUTO_WRITER_KV);
 
-    await queue(createBatch([{ taskId: task.id }]), env);
+    await queue(createBatch([{ taskId: task.id, userId: task.userId }]), env);
 
     const stored = JSON.parse(
-      (await env.AUTO_WRITER_KV.get(taskKey(task.id))) ?? "{}",
+      (await env.AUTO_WRITER_KV.get(taskKey(task.userId, task.id))) ?? "{}",
     ) as WritingTask;
     expect(stored.status).toBe("failed");
     expect(stored.error).toContain("LLM request failed with status 500");
@@ -135,10 +122,10 @@ describe("writing queue handler", () => {
     const env = { AUTO_WRITER_KV: kv };
     const task = await createTask(kv);
 
-    await queue(createBatch([{ taskId: task.id }]), env);
+    await queue(createBatch([{ taskId: task.id, userId: task.userId }]), env);
 
     const stored = JSON.parse(
-      (await kv.get(taskKey(task.id))) ?? "{}",
+      (await kv.get(taskKey(task.userId, task.id))) ?? "{}",
     ) as WritingTask;
     expect(stored.status).toBe("failed");
     expect(stored.error).toBe("LLM config is not configured");

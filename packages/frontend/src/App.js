@@ -1,7 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, } from "react";
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useNavigate, useParams, } from "react-router-dom";
 const API_BASE_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+const AUTH_TOKEN_KEY = "auto-writer-v2:jwt";
+const AUTH_EMAIL_KEY = "auto-writer-v2:email";
 const agentLabels = {
     "analyze-topic": "审题分析",
     "determine-theme": "确定立意",
@@ -18,6 +20,21 @@ const agentLabels = {
 const agentOrder = Object.keys(agentLabels);
 const createInitialSteps = () => agentOrder.map((id) => ({ id, name: agentLabels[id], status: "waiting" }));
 const apiPath = (path) => `${API_BASE_URL}${path}`;
+const AuthContext = createContext(null);
+const useAuth = () => {
+    const auth = useContext(AuthContext);
+    if (!auth) {
+        throw new Error("AuthContext is missing");
+    }
+    return auth;
+};
+const authFetch = (token, path, init = {}) => {
+    const headers = new Headers(init.headers);
+    if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+    }
+    return fetch(apiPath(path), { ...init, headers });
+};
 const summarize = (value) => {
     const compact = value.replace(/\s+/g, " ").trim();
     return compact.length > 92 ? `${compact.slice(0, 92)}...` : compact;
@@ -27,13 +44,103 @@ const essayParagraphs = (essay) => essay
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
 function App() {
-    return (_jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsxs(Route, { path: "/", element: _jsx(Shell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }));
+    const [token, setToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY));
+    const [userEmail, setUserEmail] = useState(() => localStorage.getItem(AUTH_EMAIL_KEY) ?? "");
+    const auth = useMemo(() => ({
+        token,
+        userEmail,
+        isLoggedIn: Boolean(token),
+        login: (nextToken, email) => {
+            localStorage.setItem(AUTH_TOKEN_KEY, nextToken);
+            localStorage.setItem(AUTH_EMAIL_KEY, email);
+            setToken(nextToken);
+            setUserEmail(email);
+        },
+        logout: () => {
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+            localStorage.removeItem(AUTH_EMAIL_KEY);
+            setToken(null);
+            setUserEmail("");
+        },
+    }), [token, userEmail]);
+    return (_jsx(AuthContext.Provider, { value: auth, children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(AuthShell, { children: _jsx(LoginPage, {}) }) }), _jsx(Route, { path: "/register", element: _jsx(AuthShell, { children: _jsx(RegisterPage, {}) }) }), _jsxs(Route, { path: "/", element: _jsx(ProtectedShell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }) }));
+}
+function ProtectedShell() {
+    const auth = useAuth();
+    if (!auth.isLoggedIn) {
+        return _jsx(Navigate, { to: "/login", replace: true });
+    }
+    return _jsx(Shell, {});
+}
+function AuthShell({ children }) {
+    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsx("div", { className: "mx-auto grid min-h-screen w-full max-w-7xl place-items-center px-4 py-8 sm:px-6 lg:px-8", children: children })] }));
 }
 function Shell() {
-    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsxs("div", { className: "mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8", children: [_jsxs("header", { className: "flex items-center justify-between border-b border-white/10 pb-4", children: [_jsxs(Link, { to: "/", className: "group flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft transition group-hover:border-cyan-300/50", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsxs(Link, { to: "/settings", className: "flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex", children: [_jsx("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 16 16", fill: "currentColor", className: "size-3.5", children: _jsx("path", { fillRule: "evenodd", d: "M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.186 1.436c.372.14.722.327 1.042.548l1.37-.52a.5.5 0 0 1 .613.229l.548.95a.5.5 0 0 1-.116.626l-1.108.876c.057.388.057.78 0 1.168l1.108.876a.5.5 0 0 1 .116.625l-.548.95a.5.5 0 0 1-.613.23l-1.37-.521c-.32.22-.67.407-1.042.548l-.186 1.436a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.186-1.436a4.5 4.5 0 0 1-1.042-.548l-1.37.52a.5.5 0 0 1-.613-.229l-.548-.95a.5.5 0 0 1 .116-.626l1.108-.876a4.5 4.5 0 0 1 0-1.168l-1.108-.876a.5.5 0 0 1-.116-.625l.548-.95a.5.5 0 0 1 .613-.23l1.37.521c.32-.22.67-.407 1.042-.548l.186-1.436ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z", clipRule: "evenodd" }) }), "Settings"] }), _jsxs("span", { className: "hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" }), "11 Agents"] })] })] }), _jsx(Outlet, {})] })] }));
+    const auth = useAuth();
+    const navigate = useNavigate();
+    const handleLogout = () => {
+        auth.logout();
+        navigate("/login", { replace: true });
+    };
+    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsxs("div", { className: "mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8", children: [_jsxs("header", { className: "flex items-center justify-between border-b border-white/10 pb-4", children: [_jsxs(Link, { to: "/", className: "group flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft transition group-hover:border-cyan-300/50", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("span", { className: "hidden max-w-48 truncate text-xs text-slate-300 sm:inline", children: auth.userEmail }), _jsxs(Link, { to: "/settings", className: "flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex", children: [_jsx("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 16 16", fill: "currentColor", className: "size-3.5", children: _jsx("path", { fillRule: "evenodd", d: "M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.186 1.436c.372.14.722.327 1.042.548l1.37-.52a.5.5 0 0 1 .613.229l.548.95a.5.5 0 0 1-.116.626l-1.108.876c.057.388.057.78 0 1.168l1.108.876a.5.5 0 0 1 .116.625l-.548.95a.5.5 0 0 1-.613.23l-1.37-.521c-.32.22-.67.407-1.042.548l-.186 1.436a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.186-1.436a4.5 4.5 0 0 1-1.042-.548l-1.37.52a.5.5 0 0 1-.613-.229l-.548-.95a.5.5 0 0 1 .116-.626l1.108-.876a4.5 4.5 0 0 1 0-1.168l-1.108-.876a.5.5 0 0 1-.116-.625l.548-.95a.5.5 0 0 1 .613-.23l1.37.521c.32-.22.67-.407 1.042-.548l.186-1.436ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z", clipRule: "evenodd" }) }), "Settings"] }), _jsx("button", { type: "button", onClick: handleLogout, className: "rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10", children: "Logout" }), _jsxs("span", { className: "hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" }), "11 Agents"] })] })] }), _jsx(Outlet, {})] })] }));
+}
+function LoginPage() {
+    return _jsx(AuthForm, { mode: "login" });
+}
+function RegisterPage() {
+    return _jsx(AuthForm, { mode: "register" });
+}
+function AuthForm({ mode }) {
+    const auth = useAuth();
+    const navigate = useNavigate();
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const isRegister = mode === "register";
+    useEffect(() => {
+        if (auth.isLoggedIn) {
+            navigate("/", { replace: true });
+        }
+    }, [auth.isLoggedIn, navigate]);
+    const handleSubmit = async (event) => {
+        event.preventDefault();
+        setError("");
+        if (!email.trim() || !password.trim()) {
+            setError("Email and password are required.");
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            const response = await fetch(apiPath(`/api/auth/${mode}`), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: email.trim(),
+                    password,
+                }),
+            });
+            if (!response.ok) {
+                throw new Error(isRegister
+                    ? "注册失败，请检查邮箱和密码。"
+                    : "登录失败，请检查邮箱和密码。");
+            }
+            const data = (await response.json());
+            auth.login(data.token, data.user.email);
+            navigate("/", { replace: true });
+        }
+        catch (caught) {
+            setError(caught instanceof Error ? caught.message : "请求失败。");
+        }
+        finally {
+            setIsSubmitting(false);
+        }
+    };
+    return (_jsxs("section", { className: "w-full max-w-md rounded-2xl border border-white/12 bg-ink-900/88 p-6 shadow-panel backdrop-blur md:p-8", children: [_jsxs(Link, { to: "/", className: "mb-7 flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "mb-6", children: [_jsx("p", { className: "text-sm text-slate-400", children: "Account" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: isRegister ? "创建账号" : "登录" })] }), _jsxs("form", { onSubmit: handleSubmit, className: "space-y-5", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Email" }), _jsx("input", { type: "email", value: email, onChange: (event) => setEmail(event.target.value), autoComplete: "email", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Password" }), _jsx("input", { type: "password", value: password, onChange: (event) => setPassword(event.target.value), autoComplete: isRegister ? "new-password" : "current-password", className: "field-input mt-2" })] }), error ? (_jsx("p", { className: "rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200", children: error })) : null, _jsx("button", { type: "submit", disabled: isSubmitting, className: "inline-flex h-12 w-full items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60", children: isSubmitting ? "提交中..." : isRegister ? "Register" : "Login" })] }), _jsxs("p", { className: "mt-5 text-center text-sm text-slate-400", children: [isRegister ? "Already have an account?" : "Need an account?", " ", _jsx(Link, { to: isRegister ? "/login" : "/register", className: "font-medium text-cyan-200 hover:text-cyan-100", children: isRegister ? "Login" : "Register" })] })] }));
 }
 function HomePage() {
     const navigate = useNavigate();
+    const auth = useAuth();
     const [prompt, setPrompt] = useState("");
     const [title, setTitle] = useState("");
     const [grade, setGrade] = useState("高一");
@@ -49,7 +156,7 @@ function HomePage() {
         }
         setIsSubmitting(true);
         try {
-            const response = await fetch(apiPath("/api/writing"), {
+            const response = await authFetch(auth.token, "/api/writing", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -77,6 +184,7 @@ function HomePage() {
 function WritingPage() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const auth = useAuth();
     const [task, setTask] = useState(null);
     const [steps, setSteps] = useState(createInitialSteps);
     const [error, setError] = useState("");
@@ -91,7 +199,11 @@ function WritingPage() {
             setSteps((current) => current.map((step) => {
                 const result = nextTask.agentResults.find((item) => item.agentName === step.id);
                 if (result) {
-                    return { ...step, status: "done", summary: summarize(result.output) };
+                    return {
+                        ...step,
+                        status: "done",
+                        summary: summarize(result.output),
+                    };
                 }
                 return nextTask.status === "completed"
                     ? { ...step, status: "done" }
@@ -105,8 +217,13 @@ function WritingPage() {
             }
         };
         const fetchTask = async () => {
-            const response = await fetch(apiPath(`/api/writing/${id}`));
+            const response = await authFetch(auth.token, `/api/writing/${id}`);
             if (!response.ok) {
+                if (response.status === 401) {
+                    auth.logout();
+                    navigate("/login", { replace: true });
+                    return;
+                }
                 throw new Error(`获取任务失败 (${response.status})`);
             }
             const data = (await response.json());
@@ -125,7 +242,9 @@ function WritingPage() {
                     ? {
                         ...step,
                         status: "done",
-                        summary: event.output ? summarize(event.output) : step.summary,
+                        summary: event.output
+                            ? summarize(event.output)
+                            : step.summary,
                     }
                     : step));
             }
@@ -141,34 +260,64 @@ function WritingPage() {
                 setError(caught instanceof Error ? caught.message : "获取任务失败。");
             }
         });
-        const source = new EventSource(apiPath(`/api/writing/${id}/stream`));
-        source.addEventListener("task", (message) => {
-            if (!isActive)
+        const abortController = new AbortController();
+        const handleSseFrame = (frame) => {
+            const eventLine = frame
+                .split("\n")
+                .find((line) => line.startsWith("event: "));
+            const dataLine = frame
+                .split("\n")
+                .find((line) => line.startsWith("data: "));
+            if (!eventLine || !dataLine || !isActive)
                 return;
-            applyTask(JSON.parse(message.data));
-        });
-        source.addEventListener("progress", (message) => {
-            if (!isActive)
+            const eventName = eventLine.slice("event: ".length);
+            const data = dataLine.slice("data: ".length);
+            if (eventName === "task") {
+                applyTask(JSON.parse(data));
+            }
+            if (eventName === "progress") {
+                applyProgress(JSON.parse(data));
+            }
+        };
+        const startStream = async () => {
+            const response = await authFetch(auth.token, `/api/writing/${id}/stream`, {
+                signal: abortController.signal,
+            });
+            if (!response.ok || !response.body) {
+                throw new Error(`SSE 连接失败 (${response.status})`);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (isActive) {
+                const chunk = await reader.read();
+                if (chunk.done)
+                    break;
+                buffer += decoder.decode(chunk.value, { stream: true });
+                const frames = buffer.split("\n\n");
+                buffer = frames.pop() ?? "";
+                for (const frame of frames) {
+                    handleSseFrame(frame);
+                }
+            }
+        };
+        void startStream().catch((caught) => {
+            if (!isActive || abortController.signal.aborted)
                 return;
-            applyProgress(JSON.parse(message.data));
-        });
-        source.onerror = () => {
-            source.close();
-            if (!isActive)
-                return;
+            setError(caught instanceof Error ? caught.message : "SSE 连接失败。");
             pollTimer = window.setInterval(() => {
-                void fetchTask().catch((caught) => {
-                    setError(caught instanceof Error ? caught.message : "获取任务失败。");
+                void fetchTask().catch((pollError) => {
+                    setError(pollError instanceof Error ? pollError.message : "获取任务失败。");
                 });
             }, 1800);
-        };
+        });
         return () => {
             isActive = false;
-            source.close();
+            abortController.abort();
             if (pollTimer)
                 window.clearInterval(pollTimer);
         };
-    }, [id, navigate]);
+    }, [auth, id, navigate]);
     return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-8 flex flex-col justify-between gap-4 lg:flex-row lg:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Writing task" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "Agent \u5199\u4F5C\u8FDB\u5EA6" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: task?.topic ?? "正在连接写作任务..." })] }), _jsxs("div", { className: "rounded-xl border border-white/10 bg-white/6 px-4 py-3", children: [_jsxs("div", { className: "text-2xl font-semibold text-white", children: [completedCount, _jsx("span", { className: "text-sm text-slate-400", children: " / 11" })] }), _jsx("div", { className: "mt-1 text-xs text-slate-400", children: "\u5DF2\u5B8C\u6210\u6B65\u9AA4" })] })] }), _jsx("div", { className: "mb-6 h-2 overflow-hidden rounded-full bg-white/8", children: _jsx("div", { className: "h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-300 transition-all duration-700", style: { width: `${(completedCount / agentOrder.length) * 100}%` } }) }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, _jsx("div", { className: "grid gap-3 lg:grid-cols-2", children: steps.map((step, index) => (_jsx(AgentStepCard, { step: step, index: index }, step.id))) })] }));
 }
 function AgentStepCard({ step, index }) {
@@ -195,6 +344,7 @@ function AgentStepCard({ step, index }) {
 function ResultPage() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const auth = useAuth();
     const [task, setTask] = useState(null);
     const [error, setError] = useState("");
     const [copied, setCopied] = useState(false);
@@ -202,8 +352,13 @@ function ResultPage() {
         if (!id)
             return;
         const fetchResult = async () => {
-            const response = await fetch(apiPath(`/api/writing/${id}`));
+            const response = await authFetch(auth.token, `/api/writing/${id}`);
             if (!response.ok) {
+                if (response.status === 401) {
+                    auth.logout();
+                    navigate("/login", { replace: true });
+                    return;
+                }
                 throw new Error(`获取结果失败 (${response.status})`);
             }
             const data = (await response.json());
@@ -212,7 +367,7 @@ function ResultPage() {
         void fetchResult().catch((caught) => {
             setError(caught instanceof Error ? caught.message : "获取结果失败。");
         });
-    }, [id]);
+    }, [auth, id, navigate]);
     const essay = useMemo(() => {
         if (task?.result)
             return task.result;
@@ -229,6 +384,8 @@ function ResultPage() {
 }
 export default App;
 function SettingsPage() {
+    const auth = useAuth();
+    const navigate = useNavigate();
     const [baseUrl, setBaseUrl] = useState("");
     const [apiKey, setApiKey] = useState("");
     const [model, setModel] = useState("glm-5.1");
@@ -239,7 +396,12 @@ function SettingsPage() {
     useEffect(() => {
         const load = async () => {
             try {
-                const res = await fetch(apiPath("/api/config"));
+                const res = await authFetch(auth.token, "/api/config");
+                if (res.status === 401) {
+                    auth.logout();
+                    navigate("/login", { replace: true });
+                    return;
+                }
                 if (!res.ok)
                     return;
                 const data = (await res.json());
@@ -255,7 +417,7 @@ function SettingsPage() {
             }
         };
         void load();
-    }, []);
+    }, [auth, navigate]);
     const handleSave = async (e) => {
         e.preventDefault();
         setMessage(null);
@@ -265,7 +427,7 @@ function SettingsPage() {
         }
         setIsSaving(true);
         try {
-            const res = await fetch(apiPath("/api/config"), {
+            const res = await authFetch(auth.token, "/api/config", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -282,7 +444,10 @@ function SettingsPage() {
             setMessage({ type: "ok", text: "Configuration saved successfully!" });
         }
         catch (caught) {
-            setMessage({ type: "err", text: caught instanceof Error ? caught.message : "Save failed." });
+            setMessage({
+                type: "err",
+                text: caught instanceof Error ? caught.message : "Save failed.",
+            });
         }
         finally {
             setIsSaving(false);
@@ -309,16 +474,22 @@ function SettingsPage() {
             }
             else {
                 const body = await testRes.text();
-                setMessage({ type: "err", text: `Connection failed (${testRes.status}): ${body.slice(0, 120)}` });
+                setMessage({
+                    type: "err",
+                    text: `Connection failed (${testRes.status}): ${body.slice(0, 120)}`,
+                });
             }
         }
         catch (caught) {
-            setMessage({ type: "err", text: `Connection error: ${caught instanceof Error ? caught.message : "unknown"}` });
+            setMessage({
+                type: "err",
+                text: `Connection error: ${caught instanceof Error ? caught.message : "unknown"}`,
+            });
         }
         finally {
             setTesting(false);
         }
     };
-    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-8", children: [_jsx("p", { className: "text-sm text-slate-400", children: "Configuration" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "LLM Settings" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: "Configure the OpenAI-compatible LLM API endpoint. The API key is stored server-side and never exposed to the browser after saving." })] }), _jsxs("div", { className: "w-full max-w-xl rounded-2xl border border-white/12 bg-ink-900/88 p-5 shadow-panel backdrop-blur md:p-7", children: [savedConfig ? (_jsxs("div", { className: "mb-6 rounded-xl border border-emerald-300/20 bg-emerald-300/8 px-4 py-3", children: [_jsxs("div", { className: "flex items-center gap-2 text-sm text-emerald-200", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400" }), "Configured"] }), _jsxs("div", { className: "mt-2 space-y-1 text-xs text-slate-300", children: [_jsxs("p", { children: ["Base URL: ", _jsx("span", { className: "text-white", children: savedConfig.baseUrl })] }), _jsxs("p", { children: ["API Key: ", _jsx("span", { className: "font-mono text-white", children: savedConfig.apiKeyMasked })] }), _jsxs("p", { children: ["Model: ", _jsx("span", { className: "text-white", children: savedConfig.model })] }), _jsxs("p", { children: ["Last updated: ", savedConfig.updatedAt] })] })] })) : (_jsx("div", { className: "mb-6 rounded-xl border border-amber-300/20 bg-amber-300/8 px-4 py-3 text-sm text-amber-200", children: "No LLM configured yet. Fill in the form below to get started." })), _jsxs("form", { onSubmit: handleSave, className: "space-y-5", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Base URL" }), _jsx("input", { value: baseUrl, onChange: (e) => setBaseUrl(e.target.value), placeholder: "https://api.openrouter.ai or http://your-server:3001", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "API Key" }), _jsx("input", { type: "password", value: apiKey, onChange: (e) => setApiKey(e.target.value), placeholder: savedConfig ? "Enter new key to update" : "sk-xxx...", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Model" }), _jsx("input", { value: model, onChange: (e) => setModel(e.target.value), placeholder: "e.g. glm-5.1, gpt-4o, deepseek-chat", className: "field-input mt-2" })] }), message ? (_jsx("div", { className: `rounded-lg border px-3 py-2 text-sm ${message.type === "ok" ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-red-400/30 bg-red-500/10 text-red-200"}`, children: message.text })) : null, _jsxs("div", { className: "flex gap-3", children: [_jsx("button", { type: "submit", disabled: isSaving, className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:opacity-60", children: isSaving ? "Saving..." : "Save" }), _jsx("button", { type: "button", onClick: handleTest, disabled: testing || !baseUrl || !apiKey || !model, className: "inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-medium text-white transition hover:bg-white/12 disabled:opacity-50", children: testing ? "Testing..." : "Test Connection" })] })] })] })] }));
+    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-8", children: [_jsx("p", { className: "text-sm text-slate-400", children: "Configuration" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "LLM Settings" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: "Configure the OpenAI-compatible LLM API endpoint. The API key is stored server-side and never exposed to the browser after saving." })] }), _jsxs("div", { className: "w-full max-w-xl rounded-2xl border border-white/12 bg-ink-900/88 p-5 shadow-panel backdrop-blur md:p-7", children: [savedConfig ? (_jsxs("div", { className: "mb-6 rounded-xl border border-emerald-300/20 bg-emerald-300/8 px-4 py-3", children: [_jsxs("div", { className: "flex items-center gap-2 text-sm text-emerald-200", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400" }), "Configured"] }), _jsxs("div", { className: "mt-2 space-y-1 text-xs text-slate-300", children: [_jsxs("p", { children: ["Base URL:", " ", _jsx("span", { className: "text-white", children: savedConfig.baseUrl })] }), _jsxs("p", { children: ["API Key:", " ", _jsx("span", { className: "font-mono text-white", children: savedConfig.apiKeyMasked })] }), _jsxs("p", { children: ["Model: ", _jsx("span", { className: "text-white", children: savedConfig.model })] }), _jsxs("p", { children: ["Last updated: ", savedConfig.updatedAt] })] })] })) : (_jsx("div", { className: "mb-6 rounded-xl border border-amber-300/20 bg-amber-300/8 px-4 py-3 text-sm text-amber-200", children: "No LLM configured yet. Fill in the form below to get started." })), _jsxs("form", { onSubmit: handleSave, className: "space-y-5", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Base URL" }), _jsx("input", { value: baseUrl, onChange: (e) => setBaseUrl(e.target.value), placeholder: "https://api.openrouter.ai or http://your-server:3001", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "API Key" }), _jsx("input", { type: "password", value: apiKey, onChange: (e) => setApiKey(e.target.value), placeholder: savedConfig ? "Enter new key to update" : "sk-xxx...", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Model" }), _jsx("input", { value: model, onChange: (e) => setModel(e.target.value), placeholder: "e.g. glm-5.1, gpt-4o, deepseek-chat", className: "field-input mt-2" })] }), message ? (_jsx("div", { className: `rounded-lg border px-3 py-2 text-sm ${message.type === "ok" ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200" : "border-red-400/30 bg-red-500/10 text-red-200"}`, children: message.text })) : null, _jsxs("div", { className: "flex gap-3", children: [_jsx("button", { type: "submit", disabled: isSaving, className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:opacity-60", children: isSaving ? "Saving..." : "Save" }), _jsx("button", { type: "button", onClick: handleTest, disabled: testing || !baseUrl || !apiKey || !model, className: "inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-medium text-white transition hover:bg-white/12 disabled:opacity-50", children: testing ? "Testing..." : "Test Connection" })] })] })] })] }));
 }
 //# sourceMappingURL=App.js.map

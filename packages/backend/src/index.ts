@@ -1,11 +1,13 @@
 import { cors } from "hono/cors";
 import { Hono } from "hono";
+import authRoutes from "./routes/auth";
 import configRoutes from "./routes/config";
 import writingRoutes from "./routes/writing";
+import { bearerAuth } from "./middleware/auth";
 import { queue } from "./queue";
-import type { Bindings, ErrorResponse } from "./types";
+import type { Bindings, ErrorResponse, Variables } from "./types";
 
-export const app = new Hono<{ Bindings: Bindings }>();
+export const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.use("*", cors());
 
@@ -24,6 +26,9 @@ app.get("/health", (c) => {
   return c.json({ status: "ok" });
 });
 
+app.route("/api/auth", authRoutes);
+app.use("/api/writing/*", bearerAuth());
+app.use("/api/config/*", bearerAuth());
 app.route("/api/writing", writingRoutes);
 app.route("/api/config", configRoutes);
 

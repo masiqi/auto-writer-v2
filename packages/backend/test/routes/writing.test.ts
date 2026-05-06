@@ -1,33 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../src/index";
 import { AGENTS } from "../../src/agents/definitions";
-import { progressKey, taskKey } from "../../src/queue";
+import { progressKey, taskKey, taskOwnerKey } from "../../src/queue";
 import type { ProgressEvent, WritingTask } from "../../src/agents/types";
+import { authHeaders, createMemoryKV, registerUser } from "../helpers";
 
 type WritingTaskResponse = {
   task: WritingTask;
 };
 
-const createMemoryKV = (): KVNamespace => {
-  const store = new Map<string, string>();
-
-  return {
-    get: (key: string) => Promise.resolve(store.get(key) ?? null),
-    put: (key: string, value: string) => {
-      store.set(key, value);
-      return Promise.resolve();
-    },
-    delete: (key: string) => {
-      store.delete(key);
-      return Promise.resolve();
-    },
-  } as unknown as KVNamespace;
-};
-
-const env = async () => {
+const env = async (email = "student@example.com") => {
   const kv = createMemoryKV();
+  const auth = await registerUser(kv, email);
   await kv.put(
-    "config:llm",
+    `user:${auth.user.id}:config:llm`,
     JSON.stringify({
       baseUrl: "https://llm.example.com",
       apiKey: "test-key",
@@ -38,6 +24,8 @@ const env = async () => {
 
   return {
     AUTO_WRITER_KV: kv,
+    token: auth.token,
+    user: auth.user,
   };
 };
 
@@ -74,7 +62,10 @@ describe("Writing routes", () => {
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify(request),
       },
       bindings,
@@ -87,6 +78,7 @@ describe("Writing routes", () => {
         topic: request.prompt,
         requirements: "标题：材料作文\n年级：高一",
         status: "running",
+        userId: bindings.user.id,
         agentResults: [],
       },
     });
@@ -114,7 +106,10 @@ describe("Writing routes", () => {
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify({ prompt: "写一篇关于选择的作文。" }),
       },
       bindings,
@@ -127,7 +122,7 @@ describe("Writing routes", () => {
 
     const res = await app.request(
       `/api/writing/${created.task.id}`,
-      {},
+      { headers: authHeaders(bindings.token) },
       bindings,
     );
 
@@ -159,11 +154,11 @@ describe("Writing routes", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const sentMessages: Array<{ taskId: string }> = [];
+    const sentMessages: Array<{ taskId: string; userId: string }> = [];
     const bindings = {
       ...(await env()),
       WRITING_QUEUE: {
-        sendMessage: (message: { taskId: string }) => {
+        sendMessage: (message: { taskId: string; userId: string }) => {
           sentMessages.push(message);
           return Promise.resolve();
         },
@@ -175,7 +170,10 @@ describe("Writing routes", () => {
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify({ prompt: "写一篇关于责任的作文。" }),
       },
       bindings,
@@ -185,7 +183,9 @@ describe("Writing routes", () => {
     await waitForBackground();
 
     expect(createRes.status).toBe(201);
-    expect(sentMessages).toEqual([{ taskId: created.task.id }]);
+    expect(sentMessages).toEqual([
+      { taskId: created.task.id, userId: bindings.user.id },
+    ]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -232,7 +232,10 @@ describe("Writing routes", () => {
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify({ prompt: "写一篇关于选择的作文。" }),
       },
       bindings,
@@ -244,7 +247,7 @@ describe("Writing routes", () => {
 
     const res = await app.request(
       `/api/writing/${created.task.id}`,
-      {},
+      { headers: authHeaders(bindings.token) },
       bindings,
     );
     const data = (await res.json()) as WritingTaskResponse;
@@ -269,7 +272,10 @@ describe("Writing routes", () => {
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify({ prompt: "写一篇关于挫折的作文。" }),
       },
       bindings,
@@ -281,7 +287,7 @@ describe("Writing routes", () => {
 
     const res = await app.request(
       `/api/writing/${created.task.id}`,
-      {},
+      { headers: authHeaders(bindings.token) },
       bindings,
     );
     const data = (await res.json()) as WritingTaskResponse;
@@ -291,7 +297,12 @@ describe("Writing routes", () => {
   });
 
   it("returns a not found error for missing writing tasks", async () => {
-    const res = await app.request("/api/writing/missing-id", {}, await env());
+    const bindings = await env();
+    const res = await app.request(
+      "/api/writing/missing-id",
+      { headers: authHeaders(bindings.token) },
+      bindings,
+    );
 
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({
@@ -302,15 +313,54 @@ describe("Writing routes", () => {
     });
   });
 
+  it("returns forbidden when a user reads another user's writing task", async () => {
+    const userA = await env("a@example.com");
+    const userB = await registerUser(userA.AUTO_WRITER_KV, "b@example.com");
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "private-task",
+      userId: userA.user.id,
+      topic: "写一篇关于边界的作文。",
+      status: "completed",
+      result: "private essay",
+      agentResults: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await userA.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+    await userA.AUTO_WRITER_KV.put(
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+
+    const res = await app.request(
+      `/api/writing/${task.id}`,
+      { headers: authHeaders(userB.token) },
+      userA,
+    );
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Writing task belongs to another user",
+      },
+    });
+  });
+
   it("rejects create requests without prompt", async () => {
+    const bindings = await env();
     const res = await app.request(
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify({ title: "缺少 prompt" }),
       },
-      await env(),
+      bindings,
     );
 
     expect(res.status).toBe(400);
@@ -323,14 +373,16 @@ describe("Writing routes", () => {
   });
 
   it("rejects create requests when LLM config is missing", async () => {
+    const kv = createMemoryKV();
+    const { token } = await registerUser(kv);
     const res = await app.request(
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders(token) },
         body: JSON.stringify({ prompt: "写一篇作文。" }),
       },
-      { AUTO_WRITER_KV: createMemoryKV() },
+      { AUTO_WRITER_KV: kv },
     );
 
     expect(res.status).toBe(500);
@@ -360,7 +412,10 @@ describe("Writing routes", () => {
       "/api/writing",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
         body: JSON.stringify({ prompt: "写一篇关于坚持的作文。" }),
       },
       bindings,
@@ -371,7 +426,7 @@ describe("Writing routes", () => {
 
     const res = await app.request(
       `/api/writing/${created.task.id}/stream`,
-      {},
+      { headers: authHeaders(bindings.token) },
       bindings,
     );
 
@@ -393,6 +448,7 @@ describe("Writing routes", () => {
     const now = new Date().toISOString();
     const task: WritingTask = {
       id: "streaming-task",
+      userId: bindings.user.id,
       topic: "写一篇关于坚持的作文。",
       status: "running",
       agentResults: [],
@@ -415,15 +471,18 @@ describe("Writing routes", () => {
       timestamp: new Date(Date.now() + 1).toISOString(),
     };
 
-    await bindings.AUTO_WRITER_KV.put(taskKey(task.id), JSON.stringify(task));
     await bindings.AUTO_WRITER_KV.put(
-      progressKey(task.id),
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+    await bindings.AUTO_WRITER_KV.put(
+      progressKey(task.userId, task.id),
       JSON.stringify([initialEvent]),
     );
 
     const res = await app.request(
       `/api/writing/${task.id}/stream`,
-      {},
+      { headers: authHeaders(bindings.token) },
       bindings,
     );
     const reader = res.body?.getReader();
@@ -447,7 +506,7 @@ describe("Writing routes", () => {
 
     const nextChunkPromise = reader.read();
     await bindings.AUTO_WRITER_KV.put(
-      progressKey(task.id),
+      progressKey(task.userId, task.id),
       JSON.stringify([initialEvent, nextEvent]),
     );
     await vi.advanceTimersByTimeAsync(2_000);
@@ -467,7 +526,7 @@ describe("Writing routes", () => {
     };
     const finalChunkPromise = reader.read();
     await bindings.AUTO_WRITER_KV.put(
-      taskKey(task.id),
+      taskKey(task.userId, task.id),
       JSON.stringify(finalTask),
     );
     await vi.advanceTimersByTimeAsync(2_000);

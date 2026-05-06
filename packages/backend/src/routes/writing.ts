@@ -7,11 +7,12 @@ import {
   progressKey,
   putTask,
   runPipeline,
+  taskOwnerKey,
 } from "../queue";
 import type { WritingPipelineMessage } from "../queue";
-import type { Bindings, ErrorResponse } from "../types";
+import type { Bindings, ErrorResponse, Variables } from "../types";
 
-const app = new Hono<{ Bindings: Bindings }>();
+const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 const error = (
   code: ErrorResponse["error"]["code"],
@@ -107,7 +108,8 @@ app.post("/", async (c) => {
     return c.json(error("VALIDATION_ERROR", "prompt is required"), 400);
   }
 
-  const config = await getLLMConfig(kv);
+  const userId = c.get("userId");
+  const config = await getLLMConfig(kv, userId);
   if (!config) {
     return c.json(
       error("CONFIGURATION_ERROR", "LLM config is not configured"),
@@ -123,6 +125,7 @@ app.post("/", async (c) => {
   );
   const task: WritingTask = {
     id: crypto.randomUUID(),
+    userId,
     topic: input.prompt.trim(),
     status: "running",
     agentResults: [],
@@ -135,7 +138,7 @@ app.post("/", async (c) => {
   }
 
   await putTask(kv, task);
-  await kv.put(progressKey(task.id), JSON.stringify([]));
+  await kv.put(progressKey(userId, task.id), JSON.stringify([]));
 
   let executionCtx: ExecutionContext | undefined;
   try {
@@ -145,7 +148,7 @@ app.post("/", async (c) => {
   }
 
   if (c.env.WRITING_QUEUE) {
-    await sendQueueMessage(c.env.WRITING_QUEUE, { taskId: task.id });
+    await sendQueueMessage(c.env.WRITING_QUEUE, { taskId: task.id, userId });
   } else {
     waitUntil(executionCtx, runPipeline(kv, task, config));
   }
@@ -162,7 +165,17 @@ app.get("/:id", async (c) => {
     );
   }
 
-  const task = await getTask(kv, c.req.param("id"));
+  const id = c.req.param("id");
+  const userId = c.get("userId");
+  const ownerId = await kv.get(taskOwnerKey(id));
+  if (ownerId && ownerId !== userId) {
+    return c.json(
+      error("FORBIDDEN", "Writing task belongs to another user"),
+      403,
+    );
+  }
+
+  const task = await getTask(kv, userId, id);
   if (!task) {
     return c.json(error("NOT_FOUND", "Writing task not found"), 404);
   }
@@ -180,12 +193,20 @@ app.get("/:id/stream", async (c) => {
   }
 
   const id = c.req.param("id");
-  const task = await getTask(kv, id);
+  const userId = c.get("userId");
+  const ownerId = await kv.get(taskOwnerKey(id));
+  if (ownerId && ownerId !== userId) {
+    return c.json(
+      error("FORBIDDEN", "Writing task belongs to another user"),
+      403,
+    );
+  }
+  const task = await getTask(kv, userId, id);
   if (!task) {
     return c.json(error("NOT_FOUND", "Writing task not found"), 404);
   }
 
-  const events = await getProgressEvents(kv, id);
+  const events = await getProgressEvents(kv, userId, id);
   const encoder = new TextEncoder();
   let isCancelled = false;
 
@@ -218,8 +239,8 @@ app.get("/:id/stream", async (c) => {
           }
 
           const [nextEvents, nextTask] = await Promise.all([
-            getProgressEvents(kv, id),
-            getTask(kv, id),
+            getProgressEvents(kv, userId, id),
+            getTask(kv, userId, id),
           ]);
 
           if (nextEvents.length > sentProgressCount) {
