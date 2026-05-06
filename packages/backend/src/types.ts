@@ -1,9 +1,16 @@
 export type Bindings = {
   AUTO_WRITER_KV: KVNamespace;
-  WRITING_QUEUE?: Queue<{ taskId: string; userId: string }> & {
+  WRITING_QUEUE?: Queue<{
+    taskId: string;
+    userId: string;
+    resumeFromIndex?: number;
+    userModifications?: Record<string, string>;
+  }> & {
     sendMessage?: (message: {
       taskId: string;
       userId: string;
+      resumeFromIndex?: number;
+      userModifications?: Record<string, string>;
     }) => Promise<unknown>;
   };
 };

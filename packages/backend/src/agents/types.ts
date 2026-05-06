@@ -12,6 +12,7 @@ export interface AgentContext {
   topic: string;
   requirements?: string;
   previousOutputs: Record<string, string>;
+  userModifications?: Record<string, string>;
   config: LLMConfig;
 }
 
@@ -28,7 +29,12 @@ export interface AgentResult {
   duration: number;
 }
 
-export type TaskStatus = "pending" | "running" | "completed" | "failed";
+export type TaskStatus =
+  | "pending"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed";
 
 export interface WritingTask {
   id: string;
@@ -38,6 +44,10 @@ export interface WritingTask {
   status: TaskStatus;
   result?: string;
   error?: string;
+  interactive?: boolean;
+  pausedAtAgent?: number | null;
+  pauseReason?: string;
+  userModifications?: Record<string, string>;
   agentResults: AgentResult[];
   createdAt: string;
   updatedAt: string;
@@ -48,6 +58,7 @@ export interface ProgressEvent {
     | "agent_start"
     | "agent_progress"
     | "agent_complete"
+    | "pipeline_paused"
     | "pipeline_complete"
     | "pipeline_error";
   agentName?: string;

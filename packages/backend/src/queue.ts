@@ -1,4 +1,5 @@
 import { LLMPipelineExecutor, Pipeline } from "./agents";
+import { AGENTS } from "./agents/definitions";
 import type {
   AgentResult,
   LLMConfig,
@@ -10,6 +11,8 @@ import type { Bindings } from "./types";
 export type WritingPipelineMessage = {
   taskId: string;
   userId: string;
+  resumeFromIndex?: number;
+  userModifications?: Record<string, string>;
 };
 
 export type WritingTaskSummary = Pick<
@@ -18,6 +21,11 @@ export type WritingTaskSummary = Pick<
 > & {
   result?: string;
   error?: string;
+};
+
+export type RunPipelineOptions = {
+  resumeFromIndex?: number;
+  userModifications?: Record<string, string>;
 };
 
 export const configKey = (userId: string) => `user:${userId}:config:llm`;
@@ -146,12 +154,31 @@ export const getLLMConfig = async (
 const finalOutput = (results: AgentResult[]): string | undefined =>
   results.at(-1)?.output;
 
+const pauseReasons: Record<number, string> = {
+  2: "review_materials",
+  3: "review_outline",
+  8: "review_draft",
+};
+
+const pausePoints = Object.keys(pauseReasons).map(Number);
+
+const nextPausePoint = (fromIndex: number): number | undefined =>
+  pausePoints.find((pausePoint) => pausePoint >= fromIndex);
+
 export const runPipeline = async (
   kv: KVNamespace,
   task: WritingTask,
   config: LLMConfig,
+  options: RunPipelineOptions = {},
 ): Promise<void> => {
-  const progressEvents: ProgressEvent[] = [];
+  const resumeFromIndex = options.resumeFromIndex ?? 0;
+  const userModifications =
+    options.userModifications ?? task.userModifications ?? {};
+  const progressEvents: ProgressEvent[] = await getProgressEvents(
+    kv,
+    task.userId,
+    task.id,
+  );
   let progressWrite = Promise.resolve();
   const pipeline = new Pipeline(new LLMPipelineExecutor(), (event) => {
     progressEvents.push(event);
@@ -164,17 +191,67 @@ export const runPipeline = async (
   });
 
   try {
+    const stopAfterIndex = task.interactive
+      ? nextPausePoint(resumeFromIndex)
+      : undefined;
     const results = await pipeline.run(
       task.topic,
       task.requirements ?? "",
       config,
+      {
+        existingResults: task.agentResults,
+        resumeFromIndex,
+        stopAfterIndex,
+        userModifications,
+      },
     );
+
+    if (
+      task.interactive &&
+      stopAfterIndex !== undefined &&
+      results.length - 1 === stopAfterIndex
+    ) {
+      const pauseAgent = AGENTS[stopAfterIndex];
+      const pauseEvent: ProgressEvent = {
+        type: "pipeline_paused",
+        agentName: pauseAgent.name,
+        agentIndex: stopAfterIndex,
+        totalAgents: AGENTS.length,
+        output: results.at(-1)?.output,
+        timestamp: new Date().toISOString(),
+      };
+      progressEvents.push(pauseEvent);
+      progressWrite = progressWrite.then(() =>
+        kv.put(
+          progressKey(task.userId, task.id),
+          JSON.stringify(progressEvents),
+        ),
+      );
+      await progressWrite;
+
+      const pausedTask: WritingTask = {
+        ...task,
+        status: "paused",
+        agentResults: results,
+        pausedAtAgent: stopAfterIndex,
+        pauseReason: pauseReasons[stopAfterIndex],
+        userModifications,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await putTask(kv, pausedTask);
+      return;
+    }
+
     await progressWrite;
     const completedTask: WritingTask = {
       ...task,
       status: "completed",
       result: finalOutput(results),
       agentResults: results,
+      pausedAtAgent: null,
+      pauseReason: undefined,
+      userModifications,
       updatedAt: new Date().toISOString(),
     };
 
@@ -212,10 +289,33 @@ const isWritingPipelineMessage = (
     return false;
   }
 
-  return (
-    isNonEmptyString((body as Partial<WritingPipelineMessage>).taskId) &&
-    isNonEmptyString((body as Partial<WritingPipelineMessage>).userId)
-  );
+  const message = body as Partial<WritingPipelineMessage>;
+
+  if (
+    !isNonEmptyString(message.taskId) ||
+    !isNonEmptyString(message.userId)
+  ) {
+    return false;
+  }
+
+  if (
+    message.resumeFromIndex !== undefined &&
+    (!Number.isInteger(message.resumeFromIndex) ||
+      message.resumeFromIndex < 0 ||
+      message.resumeFromIndex >= AGENTS.length)
+  ) {
+    return false;
+  }
+
+  if (
+    message.userModifications !== undefined &&
+    (typeof message.userModifications !== "object" ||
+      message.userModifications === null)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const processMessage = async (body: unknown, env: Bindings): Promise<void> => {
@@ -243,7 +343,10 @@ const processMessage = async (body: unknown, env: Bindings): Promise<void> => {
     return;
   }
 
-  await runPipeline(kv, task, config);
+  await runPipeline(kv, task, config, {
+    resumeFromIndex: body.resumeFromIndex,
+    userModifications: body.userModifications,
+  });
 };
 
 export const queue = async (

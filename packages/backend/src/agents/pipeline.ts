@@ -8,6 +8,13 @@ import type {
 } from './types';
 import { AGENTS } from './definitions';
 
+export type PipelineRunOptions = {
+  existingResults?: AgentResult[];
+  resumeFromIndex?: number;
+  stopAfterIndex?: number;
+  userModifications?: Record<string, string>;
+};
+
 export class Pipeline {
   private agents: AgentDefinition[];
   private executor: PipelineExecutor;
@@ -19,12 +26,22 @@ export class Pipeline {
     this.onProgress = onProgress;
   }
 
-  async run(topic: string, requirements: string, config: LLMConfig): Promise<AgentResult[]> {
-    const results: AgentResult[] = [];
+  async run(
+    topic: string,
+    requirements: string,
+    config: LLMConfig,
+    options: PipelineRunOptions = {},
+  ): Promise<AgentResult[]> {
+    const results: AgentResult[] = [...(options.existingResults ?? [])];
     const previousOutputs: Record<string, string> = {};
     const totalAgents = this.agents.length;
+    const resumeFromIndex = options.resumeFromIndex ?? 0;
 
-    for (let i = 0; i < this.agents.length; i++) {
+    for (const result of results) {
+      previousOutputs[result.agentName] = result.output;
+    }
+
+    for (let i = resumeFromIndex; i < this.agents.length; i++) {
       const agent = this.agents[i];
 
       this.emit({
@@ -39,6 +56,7 @@ export class Pipeline {
         topic,
         requirements,
         previousOutputs: { ...previousOutputs },
+        userModifications: options.userModifications,
         config,
       };
 
@@ -70,6 +88,10 @@ export class Pipeline {
           output,
           timestamp: new Date().toISOString(),
         });
+
+        if (options.stopAfterIndex === i) {
+          return results;
+        }
       } catch (error) {
         const duration = Date.now() - start;
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -121,6 +143,17 @@ export class Pipeline {
         if (prevAgent) {
           parts.push(`[${prevAgent.role}]: ${context.previousOutputs[key]}`);
         }
+      }
+    }
+
+    const modifications = context.userModifications ?? {};
+    const modificationKeys = Object.keys(modifications);
+    if (modificationKeys.length > 0) {
+      parts.push('\n--- 用户修改意见 ---');
+      for (const key of modificationKeys) {
+        const modifiedAgent = this.agents.find((a) => a.name === key);
+        const label = modifiedAgent?.role ?? key;
+        parts.push(`[${label}]: ${modifications[key]}`);
       }
     }
 
