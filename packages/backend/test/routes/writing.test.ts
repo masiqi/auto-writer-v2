@@ -1,12 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../src/index";
 import { AGENTS } from "../../src/agents/definitions";
-import { progressKey, taskKey, taskOwnerKey } from "../../src/queue";
+import {
+  progressKey,
+  taskIndexKey,
+  taskKey,
+  taskOwnerKey,
+} from "../../src/queue";
 import type { ProgressEvent, WritingTask } from "../../src/agents/types";
 import { authHeaders, createMemoryKV, registerUser } from "../helpers";
 
 type WritingTaskResponse = {
   task: WritingTask;
+};
+
+type WritingTaskSummary = Pick<
+  WritingTask,
+  "id" | "topic" | "requirements" | "status" | "createdAt" | "updatedAt"
+> & {
+  result?: string;
+  error?: string;
+};
+
+type WritingTaskListResponse = {
+  tasks: WritingTaskSummary[];
 };
 
 const env = async (email = "student@example.com") => {
@@ -85,6 +102,103 @@ describe("Writing routes", () => {
     expect(data.task.id).toEqual(expect.any(String));
     expect(data.task.createdAt).toEqual(expect.any(String));
     expect(data.task.updatedAt).toEqual(expect.any(String));
+
+    const storedIndex = JSON.parse(
+      (await bindings.AUTO_WRITER_KV.get(taskIndexKey(bindings.user.id))) ??
+        "[]",
+    ) as WritingTaskSummary[];
+    expect(storedIndex).toEqual([
+      {
+        id: data.task.id,
+        topic: request.prompt,
+        requirements: "标题：材料作文\n年级：高一",
+        status: "running",
+        createdAt: data.task.createdAt,
+        updatedAt: data.task.updatedAt,
+      },
+    ]);
+  });
+
+  it("lists the authenticated user's writing tasks newest first", async () => {
+    const bindings = await env();
+    const otherUser = await registerUser(
+      bindings.AUTO_WRITER_KV,
+      "other@example.com",
+    );
+    const older: WritingTask = {
+      id: "older-task",
+      userId: bindings.user.id,
+      topic: "旧任务",
+      status: "completed",
+      result: "旧作文",
+      agentResults: [],
+      createdAt: "2026-05-01T10:00:00.000Z",
+      updatedAt: "2026-05-01T10:01:00.000Z",
+    };
+    const newer: WritingTask = {
+      id: "newer-task",
+      userId: bindings.user.id,
+      topic: "新任务",
+      requirements: "年级：高三",
+      status: "failed",
+      error: "LLM failed",
+      agentResults: [],
+      createdAt: "2026-05-02T10:00:00.000Z",
+      updatedAt: "2026-05-02T10:01:00.000Z",
+    };
+    const otherTask: WritingTask = {
+      id: "other-task",
+      userId: otherUser.user.id,
+      topic: "别人的任务",
+      status: "completed",
+      agentResults: [],
+      createdAt: "2026-05-03T10:00:00.000Z",
+      updatedAt: "2026-05-03T10:01:00.000Z",
+    };
+
+    for (const task of [older, newer, otherTask]) {
+      await bindings.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+      await bindings.AUTO_WRITER_KV.put(
+        taskKey(task.userId, task.id),
+        JSON.stringify(task),
+      );
+    }
+    await bindings.AUTO_WRITER_KV.put(
+      taskIndexKey(bindings.user.id),
+      JSON.stringify([older, newer]),
+    );
+    await bindings.AUTO_WRITER_KV.put(
+      taskIndexKey(otherUser.user.id),
+      JSON.stringify([otherTask]),
+    );
+
+    const res = await app.request(
+      "/api/writing",
+      { headers: authHeaders(bindings.token) },
+      bindings,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as WritingTaskListResponse;
+    expect(data.tasks).toEqual([
+      {
+        id: newer.id,
+        topic: newer.topic,
+        requirements: newer.requirements,
+        status: newer.status,
+        error: newer.error,
+        createdAt: newer.createdAt,
+        updatedAt: newer.updatedAt,
+      },
+      {
+        id: older.id,
+        topic: older.topic,
+        status: older.status,
+        result: older.result,
+        createdAt: older.createdAt,
+        updatedAt: older.updatedAt,
+      },
+    ]);
   });
 
   it("runs the writing pipeline in the background and stores the completed result", async () => {
@@ -132,6 +246,15 @@ describe("Writing routes", () => {
     expect(data.task.agentResults).toHaveLength(AGENTS.length);
     expect(data.task.result).toBe("agent output");
     expect(fetchMock).toHaveBeenCalledTimes(AGENTS.length);
+    const storedIndex = JSON.parse(
+      (await bindings.AUTO_WRITER_KV.get(taskIndexKey(bindings.user.id))) ??
+        "[]",
+    ) as WritingTaskSummary[];
+    expect(storedIndex[0]).toMatchObject({
+      id: created.task.id,
+      status: "completed",
+      result: "agent output",
+    });
 
     const firstRequest = JSON.parse(
       (fetchMock.mock.calls[0][1] as RequestInit).body as string,
@@ -294,6 +417,109 @@ describe("Writing routes", () => {
 
     expect(data.task.status).toBe("failed");
     expect(data.task.error).toContain("LLM request failed with status 500");
+
+    const storedIndex = JSON.parse(
+      (await bindings.AUTO_WRITER_KV.get(taskIndexKey(bindings.user.id))) ??
+        "[]",
+    ) as WritingTaskSummary[];
+    expect(storedIndex[0]).toMatchObject({
+      id: created.task.id,
+      status: "failed",
+      error: expect.stringContaining("LLM request failed with status 500"),
+    });
+  });
+
+  it("deletes a writing task, progress, owner key, and task index entry", async () => {
+    const bindings = await env();
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "delete-task",
+      userId: bindings.user.id,
+      topic: "写一篇关于取舍的作文。",
+      status: "completed",
+      result: "最终作文",
+      agentResults: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await bindings.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+    await bindings.AUTO_WRITER_KV.put(
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+    await bindings.AUTO_WRITER_KV.put(
+      progressKey(task.userId, task.id),
+      JSON.stringify([{ type: "pipeline_complete", timestamp: now }]),
+    );
+    await bindings.AUTO_WRITER_KV.put(
+      taskIndexKey(task.userId),
+      JSON.stringify([task]),
+    );
+
+    const res = await app.request(
+      `/api/writing/${task.id}`,
+      { method: "DELETE", headers: authHeaders(bindings.token) },
+      bindings,
+    );
+
+    expect(res.status).toBe(204);
+    await expect(
+      bindings.AUTO_WRITER_KV.get(taskKey(task.userId, task.id)),
+    ).resolves.toBeNull();
+    await expect(
+      bindings.AUTO_WRITER_KV.get(progressKey(task.userId, task.id)),
+    ).resolves.toBeNull();
+    await expect(
+      bindings.AUTO_WRITER_KV.get(taskOwnerKey(task.id)),
+    ).resolves.toBeNull();
+    await expect(
+      bindings.AUTO_WRITER_KV.get(taskIndexKey(task.userId)),
+    ).resolves.toBe("[]");
+  });
+
+  it("returns forbidden when a user deletes another user's writing task", async () => {
+    const userA = await env("owner@example.com");
+    const userB = await registerUser(
+      userA.AUTO_WRITER_KV,
+      "reader@example.com",
+    );
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "private-delete-task",
+      userId: userA.user.id,
+      topic: "写一篇关于边界的作文。",
+      status: "completed",
+      result: "private essay",
+      agentResults: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await userA.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+    await userA.AUTO_WRITER_KV.put(
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+    await userA.AUTO_WRITER_KV.put(
+      taskIndexKey(task.userId),
+      JSON.stringify([task]),
+    );
+
+    const res = await app.request(
+      `/api/writing/${task.id}`,
+      { method: "DELETE", headers: authHeaders(userB.token) },
+      userA,
+    );
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: {
+        code: "FORBIDDEN",
+        message: "Writing task belongs to another user",
+      },
+    });
+    await expect(
+      userA.AUTO_WRITER_KV.get(taskKey(task.userId, task.id)),
+    ).resolves.not.toBeNull();
   });
 
   it("returns a not found error for missing writing tasks", async () => {

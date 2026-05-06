@@ -34,6 +34,14 @@ interface WritingTask {
   updatedAt: string;
 }
 
+type WritingTaskSummary = Pick<
+  WritingTask,
+  "id" | "topic" | "requirements" | "status" | "createdAt" | "updatedAt"
+> & {
+  result?: string;
+  error?: string;
+};
+
 interface AgentResult {
   agentName: string;
   output: string;
@@ -128,6 +136,28 @@ const essayParagraphs = (essay: string): string[] =>
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
 
+const statusLabels: Record<TaskStatus, string> = {
+  pending: "等待中",
+  running: "写作中",
+  completed: "已完成",
+  failed: "失败",
+};
+
+const statusBadgeClasses: Record<TaskStatus, string> = {
+  pending: "border-slate-300/20 bg-slate-300/10 text-slate-200",
+  running: "border-cyan-300/30 bg-cyan-300/10 text-cyan-200",
+  completed: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
+  failed: "border-red-300/30 bg-red-400/10 text-red-200",
+};
+
+const formatDateTime = (value: string): string =>
+  new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+
 function App() {
   const [token, setToken] = useState(() =>
     localStorage.getItem(AUTH_TOKEN_KEY),
@@ -179,6 +209,7 @@ function App() {
           />
           <Route path="/" element={<ProtectedShell />}>
             <Route index element={<HomePage />} />
+            <Route path="history" element={<HistoryPage />} />
             <Route path="writing/:id" element={<WritingPage />} />
             <Route path="result/:id" element={<ResultPage />} />
             <Route path="settings" element={<SettingsPage />} />
@@ -240,6 +271,12 @@ function Shell() {
             <span className="hidden max-w-48 truncate text-xs text-slate-300 sm:inline">
               {auth.userEmail}
             </span>
+            <Link
+              to="/history"
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex"
+            >
+              History
+            </Link>
             <Link
               to="/settings"
               className="flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex"
@@ -409,6 +446,145 @@ function AuthForm({ mode }: { mode: "login" | "register" }) {
         </Link>
       </p>
     </section>
+  );
+}
+
+function HistoryPage() {
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const [tasks, setTasks] = useState<WritingTaskSummary[]>([]);
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadTasks = async () => {
+      const response = await authFetch(auth.token, "/api/writing");
+      if (!response.ok) {
+        if (response.status === 401) {
+          auth.logout();
+          navigate("/login", { replace: true });
+          return;
+        }
+        throw new Error(`获取历史任务失败 (${response.status})`);
+      }
+
+      const data = (await response.json()) as { tasks: WritingTaskSummary[] };
+      if (isActive) {
+        setTasks(data.tasks);
+      }
+    };
+
+    void loadTasks()
+      .catch((caught) => {
+        if (isActive) {
+          setError(
+            caught instanceof Error ? caught.message : "获取历史任务失败。",
+          );
+        }
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [auth, navigate]);
+
+  return (
+    <section className="flex flex-1 flex-col py-8 lg:py-10">
+      <div className="mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <p className="text-sm text-slate-400">Writing history</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white">历史任务</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            查看当前账号创建过的作文任务，继续查看进度或打开已生成的终稿。
+          </p>
+        </div>
+        <Link
+          to="/"
+          className="inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200"
+        >
+          New Task
+        </Link>
+      </div>
+
+      {error ? (
+        <p className="mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {error}
+        </p>
+      ) : null}
+
+      {isLoading ? (
+        <div className="space-y-3">
+          {[0, 1, 2].map((item) => (
+            <div
+              key={item}
+              className="h-24 animate-pulse rounded-xl border border-white/10 bg-white/6"
+            />
+          ))}
+        </div>
+      ) : tasks.length === 0 ? (
+        <div className="rounded-2xl border border-white/12 bg-ink-900/88 p-7 text-center shadow-panel backdrop-blur">
+          <h2 className="text-lg font-semibold text-white">暂无历史任务</h2>
+          <p className="mt-2 text-sm text-slate-400">
+            创建第一篇作文后，任务会显示在这里。
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {tasks.map((task) => (
+            <HistoryTaskItem key={task.id} task={task} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HistoryTaskItem({ task }: { task: WritingTaskSummary }) {
+  const target =
+    task.status === "running" || task.status === "pending"
+      ? `/writing/${task.id}`
+      : `/result/${task.id}`;
+  const preview = task.error ?? task.result ?? task.requirements ?? task.topic;
+
+  return (
+    <Link
+      to={target}
+      className="group block rounded-xl border border-white/10 bg-white/6 p-4 transition hover:border-cyan-300/30 hover:bg-white/10"
+    >
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`}
+            >
+              {statusLabels[task.status]}
+            </span>
+            <span className="text-xs text-slate-500">
+              创建于 {formatDateTime(task.createdAt)}
+            </span>
+            <span className="text-xs text-slate-500">
+              更新于 {formatDateTime(task.updatedAt)}
+            </span>
+          </div>
+          <h2 className="mt-3 line-clamp-2 text-base font-semibold leading-6 text-white transition group-hover:text-cyan-100">
+            {task.topic}
+          </h2>
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-400">
+            {preview}
+          </p>
+        </div>
+        <span className="shrink-0 text-sm text-cyan-200 transition group-hover:translate-x-1">
+          查看
+        </span>
+      </div>
+    </Link>
   );
 }
 

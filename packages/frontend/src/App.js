@@ -43,6 +43,24 @@ const essayParagraphs = (essay) => essay
     .split(/\n{2,}|\r\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
+const statusLabels = {
+    pending: "等待中",
+    running: "写作中",
+    completed: "已完成",
+    failed: "失败",
+};
+const statusBadgeClasses = {
+    pending: "border-slate-300/20 bg-slate-300/10 text-slate-200",
+    running: "border-cyan-300/30 bg-cyan-300/10 text-cyan-200",
+    completed: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
+    failed: "border-red-300/30 bg-red-400/10 text-red-200",
+};
+const formatDateTime = (value) => new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+}).format(new Date(value));
 function App() {
     const [token, setToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY));
     const [userEmail, setUserEmail] = useState(() => localStorage.getItem(AUTH_EMAIL_KEY) ?? "");
@@ -63,7 +81,7 @@ function App() {
             setUserEmail("");
         },
     }), [token, userEmail]);
-    return (_jsx(AuthContext.Provider, { value: auth, children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(AuthShell, { children: _jsx(LoginPage, {}) }) }), _jsx(Route, { path: "/register", element: _jsx(AuthShell, { children: _jsx(RegisterPage, {}) }) }), _jsxs(Route, { path: "/", element: _jsx(ProtectedShell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }) }));
+    return (_jsx(AuthContext.Provider, { value: auth, children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(AuthShell, { children: _jsx(LoginPage, {}) }) }), _jsx(Route, { path: "/register", element: _jsx(AuthShell, { children: _jsx(RegisterPage, {}) }) }), _jsxs(Route, { path: "/", element: _jsx(ProtectedShell, {}), children: [_jsx(Route, { index: true, element: _jsx(HomePage, {}) }), _jsx(Route, { path: "history", element: _jsx(HistoryPage, {}) }), _jsx(Route, { path: "writing/:id", element: _jsx(WritingPage, {}) }), _jsx(Route, { path: "result/:id", element: _jsx(ResultPage, {}) }), _jsx(Route, { path: "settings", element: _jsx(SettingsPage, {}) })] }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] }) }) }));
 }
 function ProtectedShell() {
     const auth = useAuth();
@@ -82,7 +100,7 @@ function Shell() {
         auth.logout();
         navigate("/login", { replace: true });
     };
-    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsxs("div", { className: "mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8", children: [_jsxs("header", { className: "flex items-center justify-between border-b border-white/10 pb-4", children: [_jsxs(Link, { to: "/", className: "group flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft transition group-hover:border-cyan-300/50", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("span", { className: "hidden max-w-48 truncate text-xs text-slate-300 sm:inline", children: auth.userEmail }), _jsxs(Link, { to: "/settings", className: "flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex", children: [_jsx("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 16 16", fill: "currentColor", className: "size-3.5", children: _jsx("path", { fillRule: "evenodd", d: "M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.186 1.436c.372.14.722.327 1.042.548l1.37-.52a.5.5 0 0 1 .613.229l.548.95a.5.5 0 0 1-.116.626l-1.108.876c.057.388.057.78 0 1.168l1.108.876a.5.5 0 0 1 .116.625l-.548.95a.5.5 0 0 1-.613.23l-1.37-.521c-.32.22-.67.407-1.042.548l-.186 1.436a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.186-1.436a4.5 4.5 0 0 1-1.042-.548l-1.37.52a.5.5 0 0 1-.613-.229l-.548-.95a.5.5 0 0 1 .116-.626l1.108-.876a4.5 4.5 0 0 1 0-1.168l-1.108-.876a.5.5 0 0 1-.116-.625l.548-.95a.5.5 0 0 1 .613-.23l1.37.521c.32-.22.67-.407 1.042-.548l.186-1.436ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z", clipRule: "evenodd" }) }), "Settings"] }), _jsx("button", { type: "button", onClick: handleLogout, className: "rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10", children: "Logout" }), _jsxs("span", { className: "hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" }), "11 Agents"] })] })] }), _jsx(Outlet, {})] })] }));
+    return (_jsxs("main", { className: "min-h-screen overflow-hidden bg-ink-950 text-slate-100", children: [_jsx("div", { className: "fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_80%_20%,rgba(168,85,247,0.14),transparent_28%),linear-gradient(180deg,#09090b_0%,#111827_52%,#09090b_100%)]" }), _jsxs("div", { className: "mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8", children: [_jsxs("header", { className: "flex items-center justify-between border-b border-white/10 pb-4", children: [_jsxs(Link, { to: "/", className: "group flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft transition group-hover:border-cyan-300/50", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("span", { className: "hidden max-w-48 truncate text-xs text-slate-300 sm:inline", children: auth.userEmail }), _jsx(Link, { to: "/history", className: "flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex", children: "History" }), _jsxs(Link, { to: "/settings", className: "flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10 sm:flex", children: [_jsx("svg", { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 16 16", fill: "currentColor", className: "size-3.5", children: _jsx("path", { fillRule: "evenodd", d: "M6.955 1.45A.5.5 0 0 1 7.452 1h1.096a.5.5 0 0 1 .497.45l.186 1.436c.372.14.722.327 1.042.548l1.37-.52a.5.5 0 0 1 .613.229l.548.95a.5.5 0 0 1-.116.626l-1.108.876c.057.388.057.78 0 1.168l1.108.876a.5.5 0 0 1 .116.625l-.548.95a.5.5 0 0 1-.613.23l-1.37-.521c-.32.22-.67.407-1.042.548l-.186 1.436a.5.5 0 0 1-.497.45H7.452a.5.5 0 0 1-.497-.45l-.186-1.436a4.5 4.5 0 0 1-1.042-.548l-1.37.52a.5.5 0 0 1-.613-.229l-.548-.95a.5.5 0 0 1 .116-.626l1.108-.876a4.5 4.5 0 0 1 0-1.168l-1.108-.876a.5.5 0 0 1-.116-.625l.548-.95a.5.5 0 0 1 .613-.23l1.37.521c.32-.22.67-.407 1.042-.548l.186-1.436ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z", clipRule: "evenodd" }) }), "Settings"] }), _jsx("button", { type: "button", onClick: handleLogout, className: "rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 transition hover:border-white/20 hover:bg-white/10", children: "Logout" }), _jsxs("span", { className: "hidden items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-xs text-slate-300 sm:flex", children: [_jsx("span", { className: "size-2 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.8)]" }), "11 Agents"] })] })] }), _jsx(Outlet, {})] })] }));
 }
 function LoginPage() {
     return _jsx(AuthForm, { mode: "login" });
@@ -137,6 +155,53 @@ function AuthForm({ mode }) {
         }
     };
     return (_jsxs("section", { className: "w-full max-w-md rounded-2xl border border-white/12 bg-ink-900/88 p-6 shadow-panel backdrop-blur md:p-8", children: [_jsxs(Link, { to: "/", className: "mb-7 flex items-center gap-3", children: [_jsx("span", { className: "grid size-9 place-items-center rounded-xl border border-white/12 bg-white/8 text-sm font-semibold text-cyan-200 shadow-soft", children: "\u6587" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-semibold tracking-wide text-white", children: "Auto Writer V2" }), _jsx("span", { className: "text-xs text-slate-400", children: "\u9AD8\u4E2D\u4F5C\u6587\u591A\u667A\u80FD\u4F53\u52A9\u624B" })] })] }), _jsxs("div", { className: "mb-6", children: [_jsx("p", { className: "text-sm text-slate-400", children: "Account" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: isRegister ? "创建账号" : "登录" })] }), _jsxs("form", { onSubmit: handleSubmit, className: "space-y-5", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Email" }), _jsx("input", { type: "email", value: email, onChange: (event) => setEmail(event.target.value), autoComplete: "email", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "Password" }), _jsx("input", { type: "password", value: password, onChange: (event) => setPassword(event.target.value), autoComplete: isRegister ? "new-password" : "current-password", className: "field-input mt-2" })] }), error ? (_jsx("p", { className: "rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200", children: error })) : null, _jsx("button", { type: "submit", disabled: isSubmitting, className: "inline-flex h-12 w-full items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60", children: isSubmitting ? "提交中..." : isRegister ? "Register" : "Login" })] }), _jsxs("p", { className: "mt-5 text-center text-sm text-slate-400", children: [isRegister ? "Already have an account?" : "Need an account?", " ", _jsx(Link, { to: isRegister ? "/login" : "/register", className: "font-medium text-cyan-200 hover:text-cyan-100", children: isRegister ? "Login" : "Register" })] })] }));
+}
+function HistoryPage() {
+    const auth = useAuth();
+    const navigate = useNavigate();
+    const [tasks, setTasks] = useState([]);
+    const [error, setError] = useState("");
+    const [isLoading, setIsLoading] = useState(true);
+    useEffect(() => {
+        let isActive = true;
+        const loadTasks = async () => {
+            const response = await authFetch(auth.token, "/api/writing");
+            if (!response.ok) {
+                if (response.status === 401) {
+                    auth.logout();
+                    navigate("/login", { replace: true });
+                    return;
+                }
+                throw new Error(`获取历史任务失败 (${response.status})`);
+            }
+            const data = (await response.json());
+            if (isActive) {
+                setTasks(data.tasks);
+            }
+        };
+        void loadTasks()
+            .catch((caught) => {
+            if (isActive) {
+                setError(caught instanceof Error ? caught.message : "获取历史任务失败。");
+            }
+        })
+            .finally(() => {
+            if (isActive) {
+                setIsLoading(false);
+            }
+        });
+        return () => {
+            isActive = false;
+        };
+    }, [auth, navigate]);
+    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-7 flex flex-col justify-between gap-4 md:flex-row md:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Writing history" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "\u5386\u53F2\u4EFB\u52A1" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: "\u67E5\u770B\u5F53\u524D\u8D26\u53F7\u521B\u5EFA\u8FC7\u7684\u4F5C\u6587\u4EFB\u52A1\uFF0C\u7EE7\u7EED\u67E5\u770B\u8FDB\u5EA6\u6216\u6253\u5F00\u5DF2\u751F\u6210\u7684\u7EC8\u7A3F\u3002" })] }), _jsx(Link, { to: "/", className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200", children: "New Task" })] }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, isLoading ? (_jsx("div", { className: "space-y-3", children: [0, 1, 2].map((item) => (_jsx("div", { className: "h-24 animate-pulse rounded-xl border border-white/10 bg-white/6" }, item))) })) : tasks.length === 0 ? (_jsxs("div", { className: "rounded-2xl border border-white/12 bg-ink-900/88 p-7 text-center shadow-panel backdrop-blur", children: [_jsx("h2", { className: "text-lg font-semibold text-white", children: "\u6682\u65E0\u5386\u53F2\u4EFB\u52A1" }), _jsx("p", { className: "mt-2 text-sm text-slate-400", children: "\u521B\u5EFA\u7B2C\u4E00\u7BC7\u4F5C\u6587\u540E\uFF0C\u4EFB\u52A1\u4F1A\u663E\u793A\u5728\u8FD9\u91CC\u3002" })] })) : (_jsx("div", { className: "space-y-3", children: tasks.map((task) => (_jsx(HistoryTaskItem, { task: task }, task.id))) }))] }));
+}
+function HistoryTaskItem({ task }) {
+    const target = task.status === "running" || task.status === "pending"
+        ? `/writing/${task.id}`
+        : `/result/${task.id}`;
+    const preview = task.error ?? task.result ?? task.requirements ?? task.topic;
+    return (_jsx(Link, { to: target, className: "group block rounded-xl border border-white/10 bg-white/6 p-4 transition hover:border-cyan-300/30 hover:bg-white/10", children: _jsxs("div", { className: "flex flex-col gap-3 md:flex-row md:items-start md:justify-between", children: [_jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex flex-wrap items-center gap-3", children: [_jsx("span", { className: `rounded-full border px-2.5 py-1 text-xs ${statusBadgeClasses[task.status]}`, children: statusLabels[task.status] }), _jsxs("span", { className: "text-xs text-slate-500", children: ["\u521B\u5EFA\u4E8E ", formatDateTime(task.createdAt)] }), _jsxs("span", { className: "text-xs text-slate-500", children: ["\u66F4\u65B0\u4E8E ", formatDateTime(task.updatedAt)] })] }), _jsx("h2", { className: "mt-3 line-clamp-2 text-base font-semibold leading-6 text-white transition group-hover:text-cyan-100", children: task.topic }), _jsx("p", { className: "mt-2 line-clamp-2 text-sm leading-6 text-slate-400", children: preview })] }), _jsx("span", { className: "shrink-0 text-sm text-cyan-200 transition group-hover:translate-x-1", children: "\u67E5\u770B" })] }) }));
 }
 function HomePage() {
     const navigate = useNavigate();
