@@ -26,6 +26,13 @@ type WritingTaskListResponse = {
   tasks: WritingTaskSummary[];
 };
 
+type TestWritingPipelineMessage = {
+  taskId: string;
+  userId: string;
+  resumeFromIndex?: number;
+  userModifications?: Record<string, string>;
+};
+
 const env = async (email = "student@example.com") => {
   const kv = createMemoryKV();
   const auth = await registerUser(kv, email);
@@ -310,6 +317,169 @@ describe("Writing routes", () => {
       { taskId: created.task.id, userId: bindings.user.id },
     ]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts the interactive flag when creating a writing task", async () => {
+    const sentMessages: TestWritingPipelineMessage[] = [];
+    const bindings = {
+      ...(await env()),
+      WRITING_QUEUE: {
+        sendMessage: (message: TestWritingPipelineMessage) => {
+          sentMessages.push(message);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const createRes = await app.request(
+      "/api/writing",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
+        body: JSON.stringify({
+          prompt: "写一篇关于责任的作文。",
+          interactive: true,
+        }),
+      },
+      bindings,
+    );
+
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as WritingTaskResponse;
+    expect(created.task.interactive).toBe(true);
+    expect(created.task.pausedAtAgent).toBeNull();
+    expect(sentMessages).toEqual([
+      { taskId: created.task.id, userId: bindings.user.id },
+    ]);
+  });
+
+  it("approves a paused task and queues resume from the next agent", async () => {
+    const bindings = await env();
+    const sentMessages: TestWritingPipelineMessage[] = [];
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "paused-task",
+      userId: bindings.user.id,
+      topic: "写一篇关于选择的作文。",
+      status: "paused",
+      interactive: true,
+      pausedAtAgent: 2,
+      pauseReason: "review_materials",
+      agentResults: [
+        { agentName: "select-materials", output: "素材输出", duration: 1 },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await bindings.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+    await bindings.AUTO_WRITER_KV.put(
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+    const actionBindings = {
+      ...bindings,
+      WRITING_QUEUE: {
+        sendMessage: (message: TestWritingPipelineMessage) => {
+          sentMessages.push(message);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const res = await app.request(
+      `/api/writing/${task.id}/action`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
+        body: JSON.stringify({ action: "approve" }),
+      },
+      actionBindings,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as WritingTaskResponse;
+    expect(data.task.status).toBe("running");
+    expect(data.task.pausedAtAgent).toBeNull();
+    expect(data.task.pauseReason).toBeUndefined();
+    expect(sentMessages).toEqual([
+      {
+        taskId: task.id,
+        userId: bindings.user.id,
+        resumeFromIndex: 3,
+        userModifications: undefined,
+      },
+    ]);
+  });
+
+  it("stores a modification and queues resume for a paused task", async () => {
+    const bindings = await env();
+    const sentMessages: TestWritingPipelineMessage[] = [];
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "modify-task",
+      userId: bindings.user.id,
+      topic: "写一篇关于选择的作文。",
+      status: "paused",
+      interactive: true,
+      pausedAtAgent: 3,
+      pauseReason: "review_outline",
+      agentResults: [
+        { agentName: "outline", output: "大纲输出", duration: 1 },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await bindings.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+    await bindings.AUTO_WRITER_KV.put(
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+    const actionBindings = {
+      ...bindings,
+      WRITING_QUEUE: {
+        sendMessage: (message: TestWritingPipelineMessage) => {
+          sentMessages.push(message);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const res = await app.request(
+      `/api/writing/${task.id}/action`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(bindings.token),
+        },
+        body: JSON.stringify({
+          action: "modify",
+          modification: "请把结构改成递进式。",
+        }),
+      },
+      actionBindings,
+    );
+
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as WritingTaskResponse;
+    expect(data.task.status).toBe("running");
+    expect(data.task.userModifications).toEqual({
+      outline: "请把结构改成递进式。",
+    });
+    expect(sentMessages).toEqual([
+      {
+        taskId: task.id,
+        userId: bindings.user.id,
+        resumeFromIndex: 4,
+        userModifications: { outline: "请把结构改成递进式。" },
+      },
+    ]);
   });
 
   it("stores essay text in task result after all agents complete", async () => {
@@ -665,6 +835,57 @@ describe("Writing routes", () => {
     expect(body).toContain("event: progress");
     expect(body).toContain('"type":"agent_start"');
     expect(body).toContain('"type":"pipeline_complete"');
+  });
+
+  it("streams pipeline paused progress events as SSE", async () => {
+    const bindings = await env();
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "paused-stream-task",
+      userId: bindings.user.id,
+      topic: "写一篇关于坚持的作文。",
+      status: "paused",
+      interactive: true,
+      pausedAtAgent: 2,
+      pauseReason: "review_materials",
+      agentResults: [
+        { agentName: "select-materials", output: "素材输出", duration: 1 },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const pausedEvent: ProgressEvent = {
+      type: "pipeline_paused",
+      agentName: "select-materials",
+      agentIndex: 2,
+      totalAgents: 11,
+      output: "素材输出",
+      timestamp: now,
+    };
+
+    await bindings.AUTO_WRITER_KV.put(taskOwnerKey(task.id), task.userId);
+    await bindings.AUTO_WRITER_KV.put(
+      taskKey(task.userId, task.id),
+      JSON.stringify(task),
+    );
+    await bindings.AUTO_WRITER_KV.put(
+      progressKey(task.userId, task.id),
+      JSON.stringify([pausedEvent]),
+    );
+
+    const res = await app.request(
+      `/api/writing/${task.id}/stream`,
+      { headers: authHeaders(bindings.token) },
+      bindings,
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: task");
+    expect(body).toContain('"status":"paused"');
+    expect(body).toContain("event: progress");
+    expect(body).toContain('"type":"pipeline_paused"');
+    expect(body).toContain('"output":"素材输出"');
   });
 
   it("keeps the SSE stream open and sends progress added after polling", async () => {

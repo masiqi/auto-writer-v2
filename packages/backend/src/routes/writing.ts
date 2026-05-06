@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { AGENTS } from "../agents/definitions";
 import type { WritingTask } from "../agents";
 import {
   getLLMConfig,
@@ -66,7 +67,9 @@ type QueueWithSendMessage = Queue<WritingPipelineMessage> & {
 const SSE_POLL_INTERVAL_MS = 2_000;
 
 const isTerminalTask = (task: WritingTask): boolean =>
-  task.status === "completed" || task.status === "failed";
+  task.status === "completed" ||
+  task.status === "failed" ||
+  task.status === "paused";
 
 const sseEvent = (event: string, data: unknown): string =>
   `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -105,7 +108,10 @@ app.post("/", async (c) => {
   }
 
   const input = body as Partial<
-    Record<"title" | "prompt" | "requirements" | "grade", unknown>
+    Record<
+      "title" | "prompt" | "requirements" | "grade" | "interactive",
+      unknown
+    >
   >;
   if (!isNonEmptyString(input.prompt)) {
     return c.json(error("VALIDATION_ERROR", "prompt is required"), 400);
@@ -131,6 +137,8 @@ app.post("/", async (c) => {
     userId,
     topic: input.prompt.trim(),
     status: "running",
+    interactive: input.interactive === true,
+    pausedAtAgent: null,
     agentResults: [],
     createdAt: now,
     updatedAt: now,
@@ -197,6 +205,114 @@ app.get("/:id", async (c) => {
   }
 
   return c.json({ task });
+});
+
+app.post("/:id/action", async (c) => {
+  const kv = c.env.AUTO_WRITER_KV;
+  if (!kv) {
+    return c.json(
+      error("CONFIGURATION_ERROR", "KV binding is not configured"),
+      500,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(error("BAD_REQUEST", "Request body must be valid JSON"), 400);
+  }
+
+  const input = body as Partial<
+    Record<"action" | "modification" | "agentName", unknown>
+  >;
+  if (input.action !== "approve" && input.action !== "modify") {
+    return c.json(
+      error("VALIDATION_ERROR", "action must be approve or modify"),
+      400,
+    );
+  }
+  if (input.action === "modify" && !isNonEmptyString(input.modification)) {
+    return c.json(
+      error("VALIDATION_ERROR", "modification is required"),
+      400,
+    );
+  }
+
+  const id = c.req.param("id");
+  const userId = c.get("userId");
+  const ownerId = await kv.get(taskOwnerKey(id));
+  if (ownerId && ownerId !== userId) {
+    return c.json(
+      error("FORBIDDEN", "Writing task belongs to another user"),
+      403,
+    );
+  }
+
+  const task = await getTask(kv, userId, id);
+  if (!task) {
+    return c.json(error("NOT_FOUND", "Writing task not found"), 404);
+  }
+  if (task.status !== "paused" || task.pausedAtAgent == null) {
+    return c.json(error("VALIDATION_ERROR", "Writing task is not paused"), 400);
+  }
+
+  const config = await getLLMConfig(kv, userId);
+  if (!config) {
+    return c.json(
+      error("CONFIGURATION_ERROR", "LLM config is not configured"),
+      500,
+    );
+  }
+
+  const pausedAgent = AGENTS[task.pausedAtAgent];
+  const userModifications = { ...(task.userModifications ?? {}) };
+  if (input.action === "modify") {
+    const agentName = isNonEmptyString(input.agentName)
+      ? input.agentName.trim()
+      : pausedAgent.name;
+    userModifications[agentName] = input.modification.trim();
+  }
+
+  const updatedTask: WritingTask = {
+    ...task,
+    status: "running",
+    pausedAtAgent: null,
+    pauseReason: undefined,
+    userModifications,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await putTask(kv, updatedTask);
+
+  const message: WritingPipelineMessage = {
+    taskId: task.id,
+    userId,
+    resumeFromIndex: task.pausedAtAgent + 1,
+    userModifications:
+      Object.keys(userModifications).length > 0 ? userModifications : undefined,
+  };
+
+  let executionCtx: ExecutionContext | undefined;
+  try {
+    executionCtx = c.executionCtx;
+  } catch {
+    executionCtx = undefined;
+  }
+
+  if (c.env.WRITING_QUEUE) {
+    await sendQueueMessage(c.env.WRITING_QUEUE, message);
+  } else {
+    waitUntil(
+      executionCtx,
+      runPipeline(kv, updatedTask, config, {
+        resumeFromIndex: message.resumeFromIndex,
+        userModifications: message.userModifications,
+      }),
+    );
+  }
+
+  return c.json({ task: updatedTask });
 });
 
 app.delete("/:id", async (c) => {

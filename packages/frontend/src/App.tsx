@@ -18,7 +18,7 @@ import {
   useParams,
 } from "react-router-dom";
 
-type TaskStatus = "pending" | "running" | "completed" | "failed";
+type TaskStatus = "pending" | "running" | "paused" | "completed" | "failed";
 type AgentStatus = "waiting" | "running" | "done";
 
 interface WritingTask {
@@ -29,6 +29,10 @@ interface WritingTask {
   status: TaskStatus;
   result?: string;
   error?: string;
+  interactive?: boolean;
+  pausedAtAgent?: number | null;
+  pauseReason?: string;
+  userModifications?: Record<string, string>;
   agentResults: AgentResult[];
   createdAt: string;
   updatedAt: string;
@@ -53,6 +57,7 @@ interface ProgressEvent {
     | "agent_start"
     | "agent_progress"
     | "agent_complete"
+    | "pipeline_paused"
     | "pipeline_complete"
     | "pipeline_error";
   agentName?: string;
@@ -139,6 +144,7 @@ const essayParagraphs = (essay: string): string[] =>
 const statusLabels: Record<TaskStatus, string> = {
   pending: "等待中",
   running: "写作中",
+  paused: "待确认",
   completed: "已完成",
   failed: "失败",
 };
@@ -146,6 +152,7 @@ const statusLabels: Record<TaskStatus, string> = {
 const statusBadgeClasses: Record<TaskStatus, string> = {
   pending: "border-slate-300/20 bg-slate-300/10 text-slate-200",
   running: "border-cyan-300/30 bg-cyan-300/10 text-cyan-200",
+  paused: "border-amber-300/30 bg-amber-300/10 text-amber-100",
   completed: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
   failed: "border-red-300/30 bg-red-400/10 text-red-200",
 };
@@ -595,6 +602,7 @@ function HomePage() {
   const [title, setTitle] = useState("");
   const [grade, setGrade] = useState("高一");
   const [requirements, setRequirements] = useState("");
+  const [interactive, setInteractive] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -617,6 +625,7 @@ function HomePage() {
           title: title.trim() || undefined,
           grade,
           requirements: requirements.trim() || undefined,
+          interactive,
         }),
       });
 
@@ -721,6 +730,23 @@ function HomePage() {
           />
         </label>
 
+        <label className="mt-5 flex items-start gap-3 rounded-xl border border-white/10 bg-white/6 p-4">
+          <input
+            type="checkbox"
+            checked={interactive}
+            onChange={(event) => setInteractive(event.target.checked)}
+            className="mt-1 size-4 rounded border-white/20 bg-ink-950 text-cyan-300 focus:ring-cyan-300"
+          />
+          <span>
+            <span className="block text-sm font-medium text-white">
+              交互式写作
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-slate-400">
+              在选材、大纲和评审后暂停，确认或补充修改意见后继续。
+            </span>
+          </span>
+        </label>
+
         {error ? (
           <p className="mt-4 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
             {error}
@@ -746,8 +772,18 @@ function WritingPage() {
   const [task, setTask] = useState<WritingTask | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>(createInitialSteps);
   const [error, setError] = useState("");
+  const [streamVersion, setStreamVersion] = useState(0);
+  const [showModification, setShowModification] = useState(false);
+  const [modification, setModification] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [isActing, setIsActing] = useState(false);
 
   const completedCount = steps.filter((step) => step.status === "done").length;
+  const pausedAgent =
+    task?.pausedAtAgent != null ? agentOrder[task.pausedAtAgent] : undefined;
+  const pausedResult = pausedAgent
+    ? task?.agentResults.find((result) => result.agentName === pausedAgent)
+    : undefined;
 
   useEffect(() => {
     if (!id) return;
@@ -821,6 +857,23 @@ function WritingPage() {
               : step,
           ),
         );
+      }
+
+      if (event.type === "pipeline_paused" && event.agentName) {
+        setSteps((current) =>
+          current.map((step) =>
+            step.id === event.agentName
+              ? {
+                  ...step,
+                  status: "done",
+                  summary: event.output
+                    ? summarize(event.output)
+                    : step.summary,
+                }
+              : step,
+          ),
+        );
+        void fetchTask();
       }
 
       if (event.type === "pipeline_complete") {
@@ -903,7 +956,47 @@ function WritingPage() {
       abortController.abort();
       if (pollTimer) window.clearInterval(pollTimer);
     };
-  }, [auth, id, navigate]);
+  }, [auth, id, navigate, streamVersion]);
+
+  const submitAction = async (action: "approve" | "modify") => {
+    if (!id || !task) return;
+    setActionError("");
+
+    if (action === "modify" && !modification.trim()) {
+      setActionError("请先填写修改意见。");
+      return;
+    }
+
+    setIsActing(true);
+    try {
+      const response = await authFetch(auth.token, `/api/writing/${id}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          agentName: pausedAgent,
+          modification:
+            action === "modify" ? modification.trim() : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`提交操作失败 (${response.status})`);
+      }
+
+      const data = (await response.json()) as { task: WritingTask };
+      setTask(data.task);
+      setModification("");
+      setShowModification(false);
+      setStreamVersion((value) => value + 1);
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : "提交操作失败。",
+      );
+    } finally {
+      setIsActing(false);
+    }
+  };
 
   return (
     <section className="flex flex-1 flex-col py-8 lg:py-10">
@@ -937,6 +1030,86 @@ function WritingPage() {
         <p className="mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {error}
         </p>
+      ) : null}
+
+      {task?.status === "paused" && pausedResult ? (
+        <section className="mb-6 rounded-xl border border-amber-300/30 bg-amber-300/10 p-5 shadow-soft">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-amber-100">
+                等待确认
+              </p>
+              <h2 className="mt-2 text-xl font-semibold text-white">
+                {agentLabels[pausedResult.agentName] ?? pausedResult.agentName}
+              </h2>
+              <p className="mt-1 text-sm text-slate-300">
+                {task.pauseReason === "review_materials"
+                  ? "请确认素材是否合适，或补充替换方向。"
+                  : task.pauseReason === "review_outline"
+                    ? "请确认大纲结构是否合适，或提出调整意见。"
+                    : "请确认评审意见，或补充下一轮修改要求。"}
+              </p>
+            </div>
+            <span className="rounded-full border border-amber-200/30 bg-black/20 px-3 py-1 text-xs text-amber-100">
+              {pausedResult.agentName}
+            </span>
+          </div>
+
+          <div className="mt-5 max-h-80 overflow-auto rounded-lg border border-white/10 bg-ink-950/70 p-4">
+            <pre className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-200">
+              {pausedResult.output}
+            </pre>
+          </div>
+
+          {showModification ? (
+            <label className="mt-5 block">
+              <span className="field-label">修改意见</span>
+              <textarea
+                value={modification}
+                onChange={(event) => setModification(event.target.value)}
+                rows={4}
+                placeholder="例如：请把第二个素材换成航天工程案例，并让大纲更突出递进关系。"
+                className="field-input mt-2 resize-y"
+              />
+            </label>
+          ) : null}
+
+          {actionError ? (
+            <p className="mt-4 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {actionError}
+            </p>
+          ) : null}
+
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              disabled={isActing}
+              onClick={() => void submitAction("approve")}
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isActing ? "提交中..." : "Approve and Continue"}
+            </button>
+            {showModification ? (
+              <button
+                type="button"
+                disabled={isActing}
+                onClick={() => void submitAction("modify")}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-amber-200/30 bg-amber-200/12 px-5 text-sm font-semibold text-amber-50 transition hover:bg-amber-200/18 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Submit Changes
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isActing}
+                onClick={() => setShowModification(true)}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-semibold text-white transition hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Request Changes
+              </button>
+            )}
+          </div>
+        </section>
       ) : null}
 
       <div className="grid gap-3 lg:grid-cols-2">

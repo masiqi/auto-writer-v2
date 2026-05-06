@@ -103,6 +103,39 @@ describe('Pipeline', () => {
     expect(calls[2].user).toContain('theme-determiner');
   });
 
+  it('should resume from a specific agent index with existing outputs and user modifications', async () => {
+    const calls: Array<{ system: string; user: string }> = [];
+    const existingResults = AGENTS.slice(0, 3).map((agent) => ({
+      agentName: agent.name,
+      output: `Existing output from ${agent.name}`,
+      duration: 1,
+    }));
+    const executor: PipelineExecutor = {
+      async execute(systemPrompt: string, userMessage: string): Promise<string> {
+        calls.push({ system: systemPrompt, user: userMessage });
+        return `resumed output ${calls.length}`;
+      },
+    };
+
+    const pipeline = new Pipeline(executor);
+    const results = await pipeline.run('测试题目', '800字议论文', mockConfig, {
+      existingResults,
+      resumeFromIndex: 3,
+      userModifications: {
+        'select-materials': '请改用袁隆平和航天素材。',
+      },
+    });
+
+    expect(results).toHaveLength(AGENTS.length);
+    expect(results.slice(0, 3)).toEqual(existingResults);
+    expect(calls).toHaveLength(AGENTS.length - 3);
+    expect(calls[0].system).toBe(AGENTS[3].systemPrompt);
+    expect(calls[0].user).toContain('Existing output from analyze-topic');
+    expect(calls[0].user).toContain('Existing output from select-materials');
+    expect(calls[0].user).toContain('用户修改意见');
+    expect(calls[0].user).toContain('[material-selector]: 请改用袁隆平和航天素材。');
+  });
+
   it('should include topic and requirements in user message', async () => {
     const calls: Array<{ user: string }> = [];
     const executor: PipelineExecutor = {

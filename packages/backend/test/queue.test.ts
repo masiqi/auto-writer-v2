@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { queue } from "../src/queue";
+import { progressKey, queue } from "../src/queue";
 import { AGENTS } from "../src/agents/definitions";
 import type { WritingTask } from "../src/agents/types";
 import type { Bindings } from "../src/types";
@@ -45,8 +45,15 @@ const createTask = async (
   return task;
 };
 
+type TestWritingPipelineMessage = {
+  taskId: string;
+  userId: string;
+  resumeFromIndex?: number;
+  userModifications?: Record<string, string>;
+};
+
 const createBatch = (
-  messages: Array<{ taskId: string; userId: string }>,
+  messages: TestWritingPipelineMessage[],
 ): MessageBatch<unknown> =>
   ({
     queue: "writing-pipeline",
@@ -66,7 +73,7 @@ const createBatch = (
     },
     retryAll: vi.fn(),
     ackAll: vi.fn(),
-  }) as unknown as MessageBatch<{ taskId?: string; userId?: string }>;
+  }) as unknown as MessageBatch<TestWritingPipelineMessage>;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -97,6 +104,97 @@ describe("writing queue handler", () => {
     expect(stored.result).toBe("agent output");
     expect(stored.agentResults).toHaveLength(AGENTS.length);
     expect(fetchMock).toHaveBeenCalledTimes(AGENTS.length);
+  });
+
+  it("pauses interactive tasks after the selected materials agent", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "agent output" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const env = await createEnv();
+    const task = await createTask(env.AUTO_WRITER_KV, { interactive: true });
+
+    await queue(createBatch([{ taskId: task.id, userId: task.userId }]), env);
+
+    const stored = JSON.parse(
+      (await env.AUTO_WRITER_KV.get(taskKey(task.userId, task.id))) ?? "{}",
+    ) as WritingTask;
+    const progress = JSON.parse(
+      (await env.AUTO_WRITER_KV.get(progressKey(task.userId, task.id))) ?? "[]",
+    );
+
+    expect(stored.status).toBe("paused");
+    expect(stored.pausedAtAgent).toBe(2);
+    expect(stored.pauseReason).toBe("review_materials");
+    expect(stored.agentResults).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(progress.at(-1)).toMatchObject({
+      type: "pipeline_paused",
+      agentName: "select-materials",
+      agentIndex: 2,
+      output: "agent output",
+    });
+  });
+
+  it("resumes interactive tasks from the requested agent index", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+      };
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: body.messages[1].content } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const env = await createEnv();
+    const existingResults = AGENTS.slice(0, 3).map((agent) => ({
+      agentName: agent.name,
+      output: `Existing output from ${agent.name}`,
+      duration: 1,
+    }));
+    const task = await createTask(env.AUTO_WRITER_KV, {
+      interactive: true,
+      status: "paused",
+      pausedAtAgent: 2,
+      pauseReason: "review_materials",
+      agentResults: existingResults,
+      userModifications: {
+        "select-materials": "请换成航天素材。",
+      },
+    });
+
+    await queue(
+      createBatch([
+        {
+          taskId: task.id,
+          userId: task.userId,
+          resumeFromIndex: 3,
+          userModifications: task.userModifications,
+        },
+      ]),
+      env,
+    );
+
+    const stored = JSON.parse(
+      (await env.AUTO_WRITER_KV.get(taskKey(task.userId, task.id))) ?? "{}",
+    ) as WritingTask;
+
+    expect(stored.status).toBe("paused");
+    expect(stored.pausedAtAgent).toBe(3);
+    expect(stored.pauseReason).toBe("review_outline");
+    expect(stored.agentResults).toHaveLength(4);
+    expect(stored.agentResults[3].output).toContain("请换成航天素材。");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("marks the task as failed when queued pipeline execution fails", async () => {

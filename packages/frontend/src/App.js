@@ -46,12 +46,14 @@ const essayParagraphs = (essay) => essay
 const statusLabels = {
     pending: "等待中",
     running: "写作中",
+    paused: "待确认",
     completed: "已完成",
     failed: "失败",
 };
 const statusBadgeClasses = {
     pending: "border-slate-300/20 bg-slate-300/10 text-slate-200",
     running: "border-cyan-300/30 bg-cyan-300/10 text-cyan-200",
+    paused: "border-amber-300/30 bg-amber-300/10 text-amber-100",
     completed: "border-emerald-300/30 bg-emerald-300/10 text-emerald-200",
     failed: "border-red-300/30 bg-red-400/10 text-red-200",
 };
@@ -210,6 +212,7 @@ function HomePage() {
     const [title, setTitle] = useState("");
     const [grade, setGrade] = useState("高一");
     const [requirements, setRequirements] = useState("");
+    const [interactive, setInteractive] = useState(false);
     const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
     const handleSubmit = async (event) => {
@@ -229,6 +232,7 @@ function HomePage() {
                     title: title.trim() || undefined,
                     grade,
                     requirements: requirements.trim() || undefined,
+                    interactive,
                 }),
             });
             if (!response.ok) {
@@ -244,7 +248,7 @@ function HomePage() {
             setIsSubmitting(false);
         }
     };
-    return (_jsxs("section", { className: "grid flex-1 items-center gap-10 py-10 lg:grid-cols-[0.95fr_1.05fr] lg:py-16", children: [_jsxs("div", { className: "max-w-xl", children: [_jsx("p", { className: "mb-4 inline-flex rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-medium text-cyan-200", children: "\u4ECE\u5BA1\u9898\u5230\u7EC8\u7A3F\uFF0C\u4E00\u6B21\u5B8C\u6210" }), _jsx("h1", { className: "text-balance text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl", children: "\u9762\u5411\u9AD8\u4E2D\u4F5C\u6587\u7684 AI \u5199\u4F5C\u5DE5\u4F5C\u53F0" }), _jsx("p", { className: "mt-5 max-w-lg text-base leading-8 text-slate-300", children: "\u8F93\u5165\u9898\u76EE\u3001\u5E74\u7EA7\u548C\u5199\u4F5C\u8981\u6C42\uFF0C\u7CFB\u7EDF\u4F1A\u6309\u5BA1\u9898\u3001\u7ACB\u610F\u3001\u9009\u6750\u3001\u5927\u7EB2\u3001\u6210\u6587\u3001\u8BC4\u5BA1\u548C\u4FEE\u6539\u7684\u987A\u5E8F\u751F\u6210\u4E00\u7BC7\u5B8C\u6574\u4F5C\u6587\u3002" }), _jsx("div", { className: "mt-8 grid grid-cols-3 gap-3 text-center", children: ["审题", "成文", "评审"].map((item) => (_jsxs("div", { className: "rounded-lg border border-white/10 bg-white/6 px-3 py-4", children: [_jsx("div", { className: "text-lg font-semibold text-white", children: item }), _jsx("div", { className: "mt-1 text-xs text-slate-400", children: "Agent \u9636\u6BB5" })] }, item))) })] }), _jsxs("form", { onSubmit: handleSubmit, className: "rounded-2xl border border-white/12 bg-ink-900/88 p-5 shadow-panel backdrop-blur md:p-7", children: [_jsxs("div", { className: "mb-6 flex items-start justify-between gap-4", children: [_jsxs("div", { children: [_jsx("h2", { className: "text-xl font-semibold text-white", children: "\u5199\u4F5C brief" }), _jsx("p", { className: "mt-1 text-sm text-slate-400", children: "\u4FE1\u606F\u8D8A\u5177\u4F53\uFF0C\u6587\u7AE0\u8D8A\u8D34\u8FD1\u76EE\u6807\u3002" })] }), _jsx("span", { className: "rounded-full bg-violet-400/12 px-3 py-1 text-xs text-violet-200", children: "SSE \u5B9E\u65F6\u8FDB\u5EA6" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "\u4F5C\u6587\u9898\u76EE / \u6750\u6599" }), _jsx("textarea", { value: prompt, onChange: (event) => setPrompt(event.target.value), rows: 6, placeholder: "\u4F8B\u5982\uFF1A\u9605\u8BFB\u4E0B\u9762\u6750\u6599\uFF0C\u4EE5\u201C\u5728\u53D8\u5316\u4E2D\u575A\u5B88\u201D\u4E3A\u4E3B\u9898\u5199\u4E00\u7BC7\u4E0D\u5C11\u4E8E 800 \u5B57\u7684\u6587\u7AE0\u3002", className: "field-input mt-2 min-h-40 resize-y" })] }), _jsxs("div", { className: "mt-5 grid gap-4 sm:grid-cols-[1fr_160px]", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "\u6807\u9898\uFF08\u53EF\u9009\uFF09" }), _jsx("input", { value: title, onChange: (event) => setTitle(event.target.value), placeholder: "\u7559\u7A7A\u5219\u7531 AI \u62DF\u9898", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "\u5E74\u7EA7" }), _jsxs("select", { value: grade, onChange: (event) => setGrade(event.target.value), className: "field-input mt-2", children: [_jsx("option", { children: "\u9AD8\u4E00" }), _jsx("option", { children: "\u9AD8\u4E8C" }), _jsx("option", { children: "\u9AD8\u4E09" })] })] })] }), _jsxs("label", { className: "mt-5 block", children: [_jsx("span", { className: "field-label", children: "\u5199\u4F5C\u8981\u6C42\uFF08\u53EF\u9009\uFF09" }), _jsx("textarea", { value: requirements, onChange: (event) => setRequirements(event.target.value), rows: 4, placeholder: "\u4F8B\u5982\uFF1A\u8BAE\u8BBA\u6587\uFF0C800-1000 \u5B57\uFF0C\u8BED\u8A00\u6709\u6587\u91C7\uFF0C\u7D20\u6750\u907F\u514D\u4FD7\u5957\u3002", className: "field-input mt-2 resize-y" })] }), error ? (_jsx("p", { className: "mt-4 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200", children: error })) : null, _jsx("button", { type: "submit", disabled: isSubmitting, className: "mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60", children: isSubmitting ? "正在创建任务..." : "Start Writing" })] })] }));
+    return (_jsxs("section", { className: "grid flex-1 items-center gap-10 py-10 lg:grid-cols-[0.95fr_1.05fr] lg:py-16", children: [_jsxs("div", { className: "max-w-xl", children: [_jsx("p", { className: "mb-4 inline-flex rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-xs font-medium text-cyan-200", children: "\u4ECE\u5BA1\u9898\u5230\u7EC8\u7A3F\uFF0C\u4E00\u6B21\u5B8C\u6210" }), _jsx("h1", { className: "text-balance text-4xl font-semibold leading-tight text-white sm:text-5xl lg:text-6xl", children: "\u9762\u5411\u9AD8\u4E2D\u4F5C\u6587\u7684 AI \u5199\u4F5C\u5DE5\u4F5C\u53F0" }), _jsx("p", { className: "mt-5 max-w-lg text-base leading-8 text-slate-300", children: "\u8F93\u5165\u9898\u76EE\u3001\u5E74\u7EA7\u548C\u5199\u4F5C\u8981\u6C42\uFF0C\u7CFB\u7EDF\u4F1A\u6309\u5BA1\u9898\u3001\u7ACB\u610F\u3001\u9009\u6750\u3001\u5927\u7EB2\u3001\u6210\u6587\u3001\u8BC4\u5BA1\u548C\u4FEE\u6539\u7684\u987A\u5E8F\u751F\u6210\u4E00\u7BC7\u5B8C\u6574\u4F5C\u6587\u3002" }), _jsx("div", { className: "mt-8 grid grid-cols-3 gap-3 text-center", children: ["审题", "成文", "评审"].map((item) => (_jsxs("div", { className: "rounded-lg border border-white/10 bg-white/6 px-3 py-4", children: [_jsx("div", { className: "text-lg font-semibold text-white", children: item }), _jsx("div", { className: "mt-1 text-xs text-slate-400", children: "Agent \u9636\u6BB5" })] }, item))) })] }), _jsxs("form", { onSubmit: handleSubmit, className: "rounded-2xl border border-white/12 bg-ink-900/88 p-5 shadow-panel backdrop-blur md:p-7", children: [_jsxs("div", { className: "mb-6 flex items-start justify-between gap-4", children: [_jsxs("div", { children: [_jsx("h2", { className: "text-xl font-semibold text-white", children: "\u5199\u4F5C brief" }), _jsx("p", { className: "mt-1 text-sm text-slate-400", children: "\u4FE1\u606F\u8D8A\u5177\u4F53\uFF0C\u6587\u7AE0\u8D8A\u8D34\u8FD1\u76EE\u6807\u3002" })] }), _jsx("span", { className: "rounded-full bg-violet-400/12 px-3 py-1 text-xs text-violet-200", children: "SSE \u5B9E\u65F6\u8FDB\u5EA6" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "\u4F5C\u6587\u9898\u76EE / \u6750\u6599" }), _jsx("textarea", { value: prompt, onChange: (event) => setPrompt(event.target.value), rows: 6, placeholder: "\u4F8B\u5982\uFF1A\u9605\u8BFB\u4E0B\u9762\u6750\u6599\uFF0C\u4EE5\u201C\u5728\u53D8\u5316\u4E2D\u575A\u5B88\u201D\u4E3A\u4E3B\u9898\u5199\u4E00\u7BC7\u4E0D\u5C11\u4E8E 800 \u5B57\u7684\u6587\u7AE0\u3002", className: "field-input mt-2 min-h-40 resize-y" })] }), _jsxs("div", { className: "mt-5 grid gap-4 sm:grid-cols-[1fr_160px]", children: [_jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "\u6807\u9898\uFF08\u53EF\u9009\uFF09" }), _jsx("input", { value: title, onChange: (event) => setTitle(event.target.value), placeholder: "\u7559\u7A7A\u5219\u7531 AI \u62DF\u9898", className: "field-input mt-2" })] }), _jsxs("label", { className: "block", children: [_jsx("span", { className: "field-label", children: "\u5E74\u7EA7" }), _jsxs("select", { value: grade, onChange: (event) => setGrade(event.target.value), className: "field-input mt-2", children: [_jsx("option", { children: "\u9AD8\u4E00" }), _jsx("option", { children: "\u9AD8\u4E8C" }), _jsx("option", { children: "\u9AD8\u4E09" })] })] })] }), _jsxs("label", { className: "mt-5 block", children: [_jsx("span", { className: "field-label", children: "\u5199\u4F5C\u8981\u6C42\uFF08\u53EF\u9009\uFF09" }), _jsx("textarea", { value: requirements, onChange: (event) => setRequirements(event.target.value), rows: 4, placeholder: "\u4F8B\u5982\uFF1A\u8BAE\u8BBA\u6587\uFF0C800-1000 \u5B57\uFF0C\u8BED\u8A00\u6709\u6587\u91C7\uFF0C\u7D20\u6750\u907F\u514D\u4FD7\u5957\u3002", className: "field-input mt-2 resize-y" })] }), _jsxs("label", { className: "mt-5 flex items-start gap-3 rounded-xl border border-white/10 bg-white/6 p-4", children: [_jsx("input", { type: "checkbox", checked: interactive, onChange: (event) => setInteractive(event.target.checked), className: "mt-1 size-4 rounded border-white/20 bg-ink-950 text-cyan-300 focus:ring-cyan-300" }), _jsxs("span", { children: [_jsx("span", { className: "block text-sm font-medium text-white", children: "\u4EA4\u4E92\u5F0F\u5199\u4F5C" }), _jsx("span", { className: "mt-1 block text-xs leading-5 text-slate-400", children: "\u5728\u9009\u6750\u3001\u5927\u7EB2\u548C\u8BC4\u5BA1\u540E\u6682\u505C\uFF0C\u786E\u8BA4\u6216\u8865\u5145\u4FEE\u6539\u610F\u89C1\u540E\u7EE7\u7EED\u3002" })] })] }), error ? (_jsx("p", { className: "mt-4 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200", children: error })) : null, _jsx("button", { type: "submit", disabled: isSubmitting, className: "mt-6 inline-flex h-12 w-full items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 shadow-glow transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60", children: isSubmitting ? "正在创建任务..." : "Start Writing" })] })] }));
 }
 function WritingPage() {
     const { id } = useParams();
@@ -253,7 +257,16 @@ function WritingPage() {
     const [task, setTask] = useState(null);
     const [steps, setSteps] = useState(createInitialSteps);
     const [error, setError] = useState("");
+    const [streamVersion, setStreamVersion] = useState(0);
+    const [showModification, setShowModification] = useState(false);
+    const [modification, setModification] = useState("");
+    const [actionError, setActionError] = useState("");
+    const [isActing, setIsActing] = useState(false);
     const completedCount = steps.filter((step) => step.status === "done").length;
+    const pausedAgent = task?.pausedAtAgent != null ? agentOrder[task.pausedAtAgent] : undefined;
+    const pausedResult = pausedAgent
+        ? task?.agentResults.find((result) => result.agentName === pausedAgent)
+        : undefined;
     useEffect(() => {
         if (!id)
             return;
@@ -312,6 +325,18 @@ function WritingPage() {
                             : step.summary,
                     }
                     : step));
+            }
+            if (event.type === "pipeline_paused" && event.agentName) {
+                setSteps((current) => current.map((step) => step.id === event.agentName
+                    ? {
+                        ...step,
+                        status: "done",
+                        summary: event.output
+                            ? summarize(event.output)
+                            : step.summary,
+                    }
+                    : step));
+                void fetchTask();
             }
             if (event.type === "pipeline_complete") {
                 void fetchTask();
@@ -382,8 +407,47 @@ function WritingPage() {
             if (pollTimer)
                 window.clearInterval(pollTimer);
         };
-    }, [auth, id, navigate]);
-    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-8 flex flex-col justify-between gap-4 lg:flex-row lg:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Writing task" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "Agent \u5199\u4F5C\u8FDB\u5EA6" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: task?.topic ?? "正在连接写作任务..." })] }), _jsxs("div", { className: "rounded-xl border border-white/10 bg-white/6 px-4 py-3", children: [_jsxs("div", { className: "text-2xl font-semibold text-white", children: [completedCount, _jsx("span", { className: "text-sm text-slate-400", children: " / 11" })] }), _jsx("div", { className: "mt-1 text-xs text-slate-400", children: "\u5DF2\u5B8C\u6210\u6B65\u9AA4" })] })] }), _jsx("div", { className: "mb-6 h-2 overflow-hidden rounded-full bg-white/8", children: _jsx("div", { className: "h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-300 transition-all duration-700", style: { width: `${(completedCount / agentOrder.length) * 100}%` } }) }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, _jsx("div", { className: "grid gap-3 lg:grid-cols-2", children: steps.map((step, index) => (_jsx(AgentStepCard, { step: step, index: index }, step.id))) })] }));
+    }, [auth, id, navigate, streamVersion]);
+    const submitAction = async (action) => {
+        if (!id || !task)
+            return;
+        setActionError("");
+        if (action === "modify" && !modification.trim()) {
+            setActionError("请先填写修改意见。");
+            return;
+        }
+        setIsActing(true);
+        try {
+            const response = await authFetch(auth.token, `/api/writing/${id}/action`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action,
+                    agentName: pausedAgent,
+                    modification: action === "modify" ? modification.trim() : undefined,
+                }),
+            });
+            if (!response.ok) {
+                throw new Error(`提交操作失败 (${response.status})`);
+            }
+            const data = (await response.json());
+            setTask(data.task);
+            setModification("");
+            setShowModification(false);
+            setStreamVersion((value) => value + 1);
+        }
+        catch (caught) {
+            setActionError(caught instanceof Error ? caught.message : "提交操作失败。");
+        }
+        finally {
+            setIsActing(false);
+        }
+    };
+    return (_jsxs("section", { className: "flex flex-1 flex-col py-8 lg:py-10", children: [_jsxs("div", { className: "mb-8 flex flex-col justify-between gap-4 lg:flex-row lg:items-end", children: [_jsxs("div", { children: [_jsx("p", { className: "text-sm text-slate-400", children: "Writing task" }), _jsx("h1", { className: "mt-2 text-3xl font-semibold text-white", children: "Agent \u5199\u4F5C\u8FDB\u5EA6" }), _jsx("p", { className: "mt-2 max-w-2xl text-sm leading-6 text-slate-300", children: task?.topic ?? "正在连接写作任务..." })] }), _jsxs("div", { className: "rounded-xl border border-white/10 bg-white/6 px-4 py-3", children: [_jsxs("div", { className: "text-2xl font-semibold text-white", children: [completedCount, _jsx("span", { className: "text-sm text-slate-400", children: " / 11" })] }), _jsx("div", { className: "mt-1 text-xs text-slate-400", children: "\u5DF2\u5B8C\u6210\u6B65\u9AA4" })] })] }), _jsx("div", { className: "mb-6 h-2 overflow-hidden rounded-full bg-white/8", children: _jsx("div", { className: "h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-300 transition-all duration-700", style: { width: `${(completedCount / agentOrder.length) * 100}%` } }) }), error ? (_jsx("p", { className: "mb-5 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200", children: error })) : null, task?.status === "paused" && pausedResult ? (_jsxs("section", { className: "mb-6 rounded-xl border border-amber-300/30 bg-amber-300/10 p-5 shadow-soft", children: [_jsxs("div", { className: "flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between", children: [_jsxs("div", { children: [_jsx("p", { className: "text-xs font-medium uppercase tracking-wide text-amber-100", children: "\u7B49\u5F85\u786E\u8BA4" }), _jsx("h2", { className: "mt-2 text-xl font-semibold text-white", children: agentLabels[pausedResult.agentName] ?? pausedResult.agentName }), _jsx("p", { className: "mt-1 text-sm text-slate-300", children: task.pauseReason === "review_materials"
+                                            ? "请确认素材是否合适，或补充替换方向。"
+                                            : task.pauseReason === "review_outline"
+                                                ? "请确认大纲结构是否合适，或提出调整意见。"
+                                                : "请确认评审意见，或补充下一轮修改要求。" })] }), _jsx("span", { className: "rounded-full border border-amber-200/30 bg-black/20 px-3 py-1 text-xs text-amber-100", children: pausedResult.agentName })] }), _jsx("div", { className: "mt-5 max-h-80 overflow-auto rounded-lg border border-white/10 bg-ink-950/70 p-4", children: _jsx("pre", { className: "whitespace-pre-wrap break-words text-sm leading-7 text-slate-200", children: pausedResult.output }) }), showModification ? (_jsxs("label", { className: "mt-5 block", children: [_jsx("span", { className: "field-label", children: "\u4FEE\u6539\u610F\u89C1" }), _jsx("textarea", { value: modification, onChange: (event) => setModification(event.target.value), rows: 4, placeholder: "\u4F8B\u5982\uFF1A\u8BF7\u628A\u7B2C\u4E8C\u4E2A\u7D20\u6750\u6362\u6210\u822A\u5929\u5DE5\u7A0B\u6848\u4F8B\uFF0C\u5E76\u8BA9\u5927\u7EB2\u66F4\u7A81\u51FA\u9012\u8FDB\u5173\u7CFB\u3002", className: "field-input mt-2 resize-y" })] })) : null, actionError ? (_jsx("p", { className: "mt-4 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-200", children: actionError })) : null, _jsxs("div", { className: "mt-5 flex flex-col gap-3 sm:flex-row", children: [_jsx("button", { type: "button", disabled: isActing, onClick: () => void submitAction("approve"), className: "inline-flex h-11 items-center justify-center rounded-xl bg-cyan-300 px-5 text-sm font-semibold text-ink-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60", children: isActing ? "提交中..." : "Approve and Continue" }), showModification ? (_jsx("button", { type: "button", disabled: isActing, onClick: () => void submitAction("modify"), className: "inline-flex h-11 items-center justify-center rounded-xl border border-amber-200/30 bg-amber-200/12 px-5 text-sm font-semibold text-amber-50 transition hover:bg-amber-200/18 disabled:cursor-not-allowed disabled:opacity-60", children: "Submit Changes" })) : (_jsx("button", { type: "button", disabled: isActing, onClick: () => setShowModification(true), className: "inline-flex h-11 items-center justify-center rounded-xl border border-white/12 bg-white/8 px-5 text-sm font-semibold text-white transition hover:bg-white/12 disabled:cursor-not-allowed disabled:opacity-60", children: "Request Changes" }))] })] })) : null, _jsx("div", { className: "grid gap-3 lg:grid-cols-2", children: steps.map((step, index) => (_jsx(AgentStepCard, { step: step, index: index }, step.id))) })] }));
 }
 function AgentStepCard({ step, index }) {
     const statusText = {
