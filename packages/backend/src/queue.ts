@@ -7,23 +7,27 @@ import type {
 } from "./agents";
 import type { Bindings } from "./types";
 
-const CONFIG_KEY = "config:llm";
-
 export type WritingPipelineMessage = {
   taskId: string;
+  userId: string;
 };
 
-export const taskKey = (id: string) => `writing:${id}`;
-export const progressKey = (id: string) => `writing:${id}:progress`;
+export const configKey = (userId: string) => `user:${userId}:config:llm`;
+export const taskOwnerKey = (id: string) => `writing:${id}:owner`;
+export const taskKey = (userId: string, id: string) =>
+  `user:${userId}:writing:${id}`;
+export const progressKey = (userId: string, id: string) =>
+  `user:${userId}:writing:${id}:progress`;
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
 export const getTask = async (
   kv: KVNamespace,
+  userId: string,
   id: string,
 ): Promise<WritingTask | null> => {
-  const stored = await kv.get(taskKey(id));
+  const stored = await kv.get(taskKey(userId, id));
   return stored ? (JSON.parse(stored) as WritingTask) : null;
 };
 
@@ -31,21 +35,24 @@ export const putTask = async (
   kv: KVNamespace,
   task: WritingTask,
 ): Promise<void> => {
-  await kv.put(taskKey(task.id), JSON.stringify(task));
+  await kv.put(taskOwnerKey(task.id), task.userId);
+  await kv.put(taskKey(task.userId, task.id), JSON.stringify(task));
 };
 
 export const getProgressEvents = async (
   kv: KVNamespace,
+  userId: string,
   id: string,
 ): Promise<ProgressEvent[]> => {
-  const stored = await kv.get(progressKey(id));
+  const stored = await kv.get(progressKey(userId, id));
   return stored ? (JSON.parse(stored) as ProgressEvent[]) : [];
 };
 
 export const getLLMConfig = async (
   kv: KVNamespace,
+  userId: string,
 ): Promise<LLMConfig | null> => {
-  const stored = await kv.get(CONFIG_KEY);
+  const stored = await kv.get(configKey(userId));
   if (!stored) {
     return null;
   }
@@ -79,12 +86,19 @@ export const runPipeline = async (
   const pipeline = new Pipeline(new LLMPipelineExecutor(), (event) => {
     progressEvents.push(event);
     progressWrite = progressWrite.then(() => {
-      return kv.put(progressKey(task.id), JSON.stringify(progressEvents));
+      return kv.put(
+        progressKey(task.userId, task.id),
+        JSON.stringify(progressEvents),
+      );
     });
   });
 
   try {
-    const results = await pipeline.run(task.topic, task.requirements ?? "", config);
+    const results = await pipeline.run(
+      task.topic,
+      task.requirements ?? "",
+      config,
+    );
     await progressWrite;
     const completedTask: WritingTask = {
       ...task,
@@ -97,7 +111,7 @@ export const runPipeline = async (
     await putTask(kv, completedTask);
   } catch (caught) {
     await progressWrite;
-    const currentTask = (await getTask(kv, task.id)) ?? task;
+    const currentTask = (await getTask(kv, task.userId, task.id)) ?? task;
     await failTask(
       kv,
       currentTask,
@@ -128,13 +142,13 @@ const isWritingPipelineMessage = (
     return false;
   }
 
-  return isNonEmptyString((body as Partial<WritingPipelineMessage>).taskId);
+  return (
+    isNonEmptyString((body as Partial<WritingPipelineMessage>).taskId) &&
+    isNonEmptyString((body as Partial<WritingPipelineMessage>).userId)
+  );
 };
 
-const processMessage = async (
-  body: unknown,
-  env: Bindings,
-): Promise<void> => {
+const processMessage = async (body: unknown, env: Bindings): Promise<void> => {
   const kv = env.AUTO_WRITER_KV;
   if (!kv) {
     console.error("Writing queue cannot run without AUTO_WRITER_KV binding");
@@ -146,13 +160,13 @@ const processMessage = async (
     return;
   }
 
-  const task = await getTask(kv, body.taskId);
+  const task = await getTask(kv, body.userId, body.taskId);
   if (!task) {
     console.error(`Writing queue task not found: ${body.taskId}`);
     return;
   }
 
-  const config = await getLLMConfig(kv);
+  const config = await getLLMConfig(kv, body.userId);
   if (!config) {
     console.error(`Writing queue missing LLM config for task: ${body.taskId}`);
     await failTask(kv, task, "LLM config is not configured");
