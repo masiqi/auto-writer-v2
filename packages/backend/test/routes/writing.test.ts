@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../src/index";
 import { AGENTS } from "../../src/agents/definitions";
-import type { WritingTask } from "../../src/agents/types";
+import { progressKey, taskKey } from "../../src/queue";
+import type { ProgressEvent, WritingTask } from "../../src/agents/types";
 
 type WritingTaskResponse = {
   task: WritingTask;
@@ -56,6 +57,7 @@ const waitUntilContext = () => {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -94,14 +96,16 @@ describe("Writing routes", () => {
   });
 
   it("runs the writing pipeline in the background and stores the completed result", async () => {
-    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
-      return new Response(
-        JSON.stringify({
-          choices: [{ message: { content: "agent output" } }],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, _init?: RequestInit) => {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "agent output" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const bindings = await env();
@@ -121,7 +125,11 @@ describe("Writing routes", () => {
     expect(created.task.status).toBe("running");
     await waitForBackground();
 
-    const res = await app.request(`/api/writing/${created.task.id}`, {}, bindings);
+    const res = await app.request(
+      `/api/writing/${created.task.id}`,
+      {},
+      bindings,
+    );
 
     expect(res.status).toBe(200);
     const data = (await res.json()) as WritingTaskResponse;
@@ -198,21 +206,24 @@ describe("Writing routes", () => {
       "- 是否通过：是",
     ].join("\n");
 
-    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as {
-        messages: Array<{ role: string; content: string }>;
-      };
-      const systemPrompt = body.messages[0].content;
-      const content =
-        systemPrompt.includes("输出完整的最终作文") ? finalEssay : reviewCommentary;
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as {
+          messages: Array<{ role: string; content: string }>;
+        };
+        const systemPrompt = body.messages[0].content;
+        const content = systemPrompt.includes("输出完整的最终作文")
+          ? finalEssay
+          : reviewCommentary;
 
-      return new Response(
-        JSON.stringify({
-          choices: [{ message: { content } }],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const bindings = await env();
@@ -231,7 +242,11 @@ describe("Writing routes", () => {
 
     await waitForBackground();
 
-    const res = await app.request(`/api/writing/${created.task.id}`, {}, bindings);
+    const res = await app.request(
+      `/api/writing/${created.task.id}`,
+      {},
+      bindings,
+    );
     const data = (await res.json()) as WritingTaskResponse;
 
     expect(data.task.status).toBe("completed");
@@ -264,7 +279,11 @@ describe("Writing routes", () => {
 
     await waitForBackground();
 
-    const res = await app.request(`/api/writing/${created.task.id}`, {}, bindings);
+    const res = await app.request(
+      `/api/writing/${created.task.id}`,
+      {},
+      bindings,
+    );
     const data = (await res.json()) as WritingTaskResponse;
 
     expect(data.task.status).toBe("failed");
@@ -365,5 +384,103 @@ describe("Writing routes", () => {
     expect(body).toContain("event: progress");
     expect(body).toContain('"type":"agent_start"');
     expect(body).toContain('"type":"pipeline_complete"');
+  });
+
+  it("keeps the SSE stream open and sends progress added after polling", async () => {
+    vi.useFakeTimers();
+
+    const bindings = await env();
+    const now = new Date().toISOString();
+    const task: WritingTask = {
+      id: "streaming-task",
+      topic: "写一篇关于坚持的作文。",
+      status: "running",
+      agentResults: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    const initialEvent: ProgressEvent = {
+      type: "agent_start",
+      agentName: "analyze-topic",
+      agentIndex: 0,
+      totalAgents: 11,
+      timestamp: now,
+    };
+    const nextEvent: ProgressEvent = {
+      type: "agent_complete",
+      agentName: "analyze-topic",
+      agentIndex: 0,
+      totalAgents: 11,
+      output: "审题完成",
+      timestamp: new Date(Date.now() + 1).toISOString(),
+    };
+
+    await bindings.AUTO_WRITER_KV.put(taskKey(task.id), JSON.stringify(task));
+    await bindings.AUTO_WRITER_KV.put(
+      progressKey(task.id),
+      JSON.stringify([initialEvent]),
+    );
+
+    const res = await app.request(
+      `/api/writing/${task.id}/stream`,
+      {},
+      bindings,
+    );
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error("Expected SSE response body");
+    }
+    const decoder = new TextDecoder();
+
+    const initialChunks: string[] = [];
+    while (!initialChunks.join("").includes('"type":"agent_start"')) {
+      const initialChunk = await reader.read();
+      expect(initialChunk.done).toBe(false);
+      initialChunks.push(decoder.decode(initialChunk.value));
+    }
+    const initialBody = initialChunks.join("");
+    expect(initialBody).toContain("event: task");
+    expect(initialBody).toContain(`"id":"${task.id}"`);
+    expect(initialBody).toContain('"status":"running"');
+    expect(initialBody).toContain("event: progress");
+    expect(initialBody).toContain('"type":"agent_start"');
+
+    const nextChunkPromise = reader.read();
+    await bindings.AUTO_WRITER_KV.put(
+      progressKey(task.id),
+      JSON.stringify([initialEvent, nextEvent]),
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const nextChunk = await nextChunkPromise;
+    expect(nextChunk.done).toBe(false);
+    const nextBody = decoder.decode(nextChunk.value);
+    expect(nextBody).toBe(
+      `event: progress\ndata: ${JSON.stringify(nextEvent)}\n\n`,
+    );
+
+    const finalTask: WritingTask = {
+      ...task,
+      status: "completed",
+      result: "最终作文",
+      updatedAt: new Date(Date.now() + 2).toISOString(),
+    };
+    const finalChunkPromise = reader.read();
+    await bindings.AUTO_WRITER_KV.put(
+      taskKey(task.id),
+      JSON.stringify(finalTask),
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    const finalChunk = await finalChunkPromise;
+    expect(finalChunk.done).toBe(false);
+    const finalBody = decoder.decode(finalChunk.value);
+    expect(finalBody).toContain("event: task");
+    expect(finalBody).toContain('"status":"completed"');
+
+    await expect(reader.read()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
   });
 });
