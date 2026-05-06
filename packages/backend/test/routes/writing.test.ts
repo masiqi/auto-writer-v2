@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import app from "../../src/index";
+import { app } from "../../src/index";
 import { AGENTS } from "../../src/agents/definitions";
 import type { WritingTask } from "../../src/agents/types";
 
@@ -94,7 +94,7 @@ describe("Writing routes", () => {
   });
 
   it("runs the writing pipeline in the background and stores the completed result", async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
       return new Response(
         JSON.stringify({
           choices: [{ message: { content: "agent output" } }],
@@ -145,6 +145,40 @@ describe("Writing routes", () => {
       role: "user",
       content: expect.stringContaining("写一篇关于选择的作文。"),
     });
+  });
+
+  it("enqueues the writing pipeline when a queue binding is configured", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sentMessages: Array<{ taskId: string }> = [];
+    const bindings = {
+      ...(await env()),
+      WRITING_QUEUE: {
+        sendMessage: (message: { taskId: string }) => {
+          sentMessages.push(message);
+          return Promise.resolve();
+        },
+      },
+    };
+    const { ctx, waitForBackground } = waitUntilContext();
+
+    const createRes = await app.request(
+      "/api/writing",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "写一篇关于责任的作文。" }),
+      },
+      bindings,
+      ctx,
+    );
+    const created = (await createRes.json()) as WritingTaskResponse;
+    await waitForBackground();
+
+    expect(createRes.status).toBe(201);
+    expect(sentMessages).toEqual([{ taskId: created.task.id }]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("stores essay text in task result after all agents complete", async () => {

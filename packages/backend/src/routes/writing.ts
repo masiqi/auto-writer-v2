@@ -1,16 +1,15 @@
 import { Hono } from "hono";
-import { LLMPipelineExecutor, Pipeline } from "../agents";
-import type {
-  AgentResult,
-  LLMConfig,
-  ProgressEvent,
-  WritingTask,
-} from "../agents";
+import type { WritingTask } from "../agents";
+import {
+  getLLMConfig,
+  getProgressEvents,
+  getTask,
+  progressKey,
+  putTask,
+  runPipeline,
+} from "../queue";
+import type { WritingPipelineMessage } from "../queue";
 import type { Bindings, ErrorResponse } from "../types";
-
-const CONFIG_KEY = "config:llm";
-const taskKey = (id: string) => `writing:${id}`;
-const progressKey = (id: string) => `writing:${id}:progress`;
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -23,48 +22,6 @@ const error = (
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
-
-const getTask = async (
-  kv: KVNamespace,
-  id: string,
-): Promise<WritingTask | null> => {
-  const stored = await kv.get(taskKey(id));
-  return stored ? (JSON.parse(stored) as WritingTask) : null;
-};
-
-const putTask = async (kv: KVNamespace, task: WritingTask): Promise<void> => {
-  await kv.put(taskKey(task.id), JSON.stringify(task));
-};
-
-const getProgressEvents = async (
-  kv: KVNamespace,
-  id: string,
-): Promise<ProgressEvent[]> => {
-  const stored = await kv.get(progressKey(id));
-  return stored ? (JSON.parse(stored) as ProgressEvent[]) : [];
-};
-
-const getLLMConfig = async (kv: KVNamespace): Promise<LLMConfig | null> => {
-  const stored = await kv.get(CONFIG_KEY);
-  if (!stored) {
-    return null;
-  }
-
-  const parsed = JSON.parse(stored) as Partial<LLMConfig>;
-  if (
-    !isNonEmptyString(parsed.baseUrl) ||
-    !isNonEmptyString(parsed.apiKey) ||
-    !isNonEmptyString(parsed.model)
-  ) {
-    return null;
-  }
-
-  return {
-    baseUrl: parsed.baseUrl,
-    apiKey: parsed.apiKey,
-    model: parsed.model,
-  };
-};
 
 const buildRequirements = (
   title: unknown,
@@ -86,50 +43,6 @@ const buildRequirements = (
   return parts.join("\n");
 };
 
-const finalOutput = (results: AgentResult[]): string | undefined =>
-  results.at(-1)?.output;
-
-const runPipeline = async (
-  kv: KVNamespace,
-  task: WritingTask,
-  config: LLMConfig,
-): Promise<void> => {
-  const progressEvents: ProgressEvent[] = [];
-  let progressWrite = Promise.resolve();
-  const pipeline = new Pipeline(new LLMPipelineExecutor(), (event) => {
-    progressEvents.push(event);
-    progressWrite = progressWrite.then(() => {
-      return kv.put(progressKey(task.id), JSON.stringify(progressEvents));
-    });
-  });
-
-  try {
-    const results = await pipeline.run(task.topic, task.requirements ?? "", config);
-    await progressWrite;
-    const completedTask: WritingTask = {
-      ...task,
-      status: "completed",
-      result: finalOutput(results),
-      agentResults: results,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await putTask(kv, completedTask);
-  } catch (caught) {
-    await progressWrite;
-    const currentTask = (await getTask(kv, task.id)) ?? task;
-    const errorMessage = caught instanceof Error ? caught.message : String(caught);
-    const failedTask: WritingTask = {
-      ...currentTask,
-      status: "failed",
-      error: errorMessage,
-      updatedAt: new Date().toISOString(),
-    };
-
-    await putTask(kv, failedTask);
-  }
-};
-
 const waitUntil = (
   executionCtx: ExecutionContext | undefined,
   promise: Promise<unknown>,
@@ -140,6 +53,22 @@ const waitUntil = (
   }
 
   void promise;
+};
+
+type QueueWithSendMessage = Queue<WritingPipelineMessage> & {
+  sendMessage?: (message: WritingPipelineMessage) => Promise<unknown>;
+};
+
+const sendQueueMessage = async (
+  queue: QueueWithSendMessage,
+  message: WritingPipelineMessage,
+): Promise<void> => {
+  if (queue.sendMessage) {
+    await queue.sendMessage(message);
+    return;
+  }
+
+  await queue.send(message);
 };
 
 app.post("/", async (c) => {
@@ -196,7 +125,11 @@ app.post("/", async (c) => {
     executionCtx = undefined;
   }
 
-  waitUntil(executionCtx, runPipeline(kv, task, config));
+  if (c.env.WRITING_QUEUE) {
+    await sendQueueMessage(c.env.WRITING_QUEUE, { taskId: task.id });
+  } else {
+    waitUntil(executionCtx, runPipeline(kv, task, config));
+  }
 
   return c.json({ task }, 201);
 });
