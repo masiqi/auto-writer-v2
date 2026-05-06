@@ -2,9 +2,10 @@ import { cors } from "hono/cors";
 import { Hono } from "hono";
 import configRoutes from "./routes/config";
 import writingRoutes from "./routes/writing";
+import { queue } from "./queue";
 import type { Bindings, ErrorResponse } from "./types";
 
-const app = new Hono<{ Bindings: Bindings }>();
+export const app = new Hono<{ Bindings: Bindings }>();
 
 app.use("*", cors());
 
@@ -28,4 +29,11 @@ app.route("/api/config", configRoutes);
 
 app.notFound((c) => c.json(error("NOT_FOUND", "Not found"), 404));
 
-export default app;
+export const fetch = app.fetch;
+
+export { queue };
+
+export default {
+  fetch,
+  queue,
+} satisfies ExportedHandler<Bindings>;

@@ -6,3 +6,10 @@ compatibility_flags = ["nodejs_compat"]
 [[kv_namespaces]]
 binding = "AUTO_WRITER_KV"
 id = "4f3af98bafbd46cf8ccdcee3015e63ab"
+
+[[queues.producers]]
+binding = "WRITING_QUEUE"
+queue = "writing-pipeline"
+
+[[queues.consumers]]
+queue = "writing-pipeline"

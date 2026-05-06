@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import app from "../src/index";
+import { app } from "../src/index";
 
 describe("Backend API", () => {
   it("should return hello message on GET /", async () => {

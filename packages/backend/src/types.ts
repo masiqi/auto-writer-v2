@@ -1,5 +1,8 @@
 export type Bindings = {
   AUTO_WRITER_KV: KVNamespace;
+  WRITING_QUEUE?: Queue<{ taskId: string }> & {
+    sendMessage?: (message: { taskId: string }) => Promise<unknown>;
+  };
 };
 
 export type ErrorCode =
