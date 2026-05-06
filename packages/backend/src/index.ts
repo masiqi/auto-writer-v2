@@ -2,6 +2,7 @@ import { cors } from "hono/cors";
 import { Hono } from "hono";
 import authRoutes from "./routes/auth";
 import configRoutes from "./routes/config";
+import topicsRoutes from "./routes/topics";
 import writingRoutes from "./routes/writing";
 import { bearerAuth } from "./middleware/auth";
 import { queue } from "./queue";
@@ -29,8 +30,10 @@ app.get("/health", (c) => {
 app.route("/api/auth", authRoutes);
 app.use("/api/writing/*", bearerAuth());
 app.use("/api/config/*", bearerAuth());
+app.use("/api/topics/*", bearerAuth());
 app.route("/api/writing", writingRoutes);
 app.route("/api/config", configRoutes);
+app.route("/api/topics", topicsRoutes);
 
 app.notFound((c) => c.json(error("NOT_FOUND", "Not found"), 404));
 
